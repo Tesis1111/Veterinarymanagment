@@ -132,7 +132,7 @@ function isRateLimitedByIp(ip: string): boolean {
  * a cargo, sin tener que tocar el código.
  */
 const ADMIN_NOTIFICATION_EMAIL =
-  process.env.ADMIN_NOTIFICATION_EMAIL?.trim() || 'ferreyraemanuel19@gmail.com';
+  process.env.ADMIN_NOTIFICATION_EMAIL?.trim() || 'tesisdeies@gmail.com';
 
 async function verifyIdToken(idToken: string): Promise<string | null> {
   const cached = tokenCache.get(idToken);
