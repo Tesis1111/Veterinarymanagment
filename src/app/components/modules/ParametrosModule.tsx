@@ -19,6 +19,7 @@ import { Badge } from "../ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../ui/dialog";
+import { EmojiPicker } from "../ui/emoji-picker";
 import {
   Settings2, Plus, Edit, Trash2, Save, X, ChevronDown, ChevronRight,
   PawPrint, Stethoscope, Syringe, Shield, UserCog, Calendar,
@@ -144,11 +145,14 @@ export default function ParametrosModule() {
   const handleSaveEspecie = async () => {
     if (!especieForm.name.trim()) { toast.error("El nombre es obligatorio"); return; }
     try {
+      // El icono es opcional: si se deja vacío se guarda "" y la especie se
+      // muestra sin emoji (antes se forzaba 🐾 y no había forma de quitarlo).
+      const icon = especieForm.icon.trim();
       if (editingEspecie) {
-        await modificarEspecie(editingEspecie.id, { name: especieForm.name.trim(), icon: especieForm.icon || "🐾", description: especieForm.description || "" });
+        await modificarEspecie(editingEspecie.id, { name: especieForm.name.trim(), icon, description: especieForm.description || "" });
         showSuccess("Especie actualizada");
       } else {
-        await registrarEspecie({ name: especieForm.name.trim(), icon: especieForm.icon || "🐾", description: especieForm.description || "", active: true }, user!.id);
+        await registrarEspecie({ name: especieForm.name.trim(), icon, description: especieForm.description || "", active: true }, user!.id);
         showSuccess("Especie creada");
       }
       // onSnapshot actualiza la lista automáticamente — no necesitamos setEspecies manual
@@ -428,7 +432,7 @@ export default function ParametrosModule() {
                             className="flex items-center gap-2 flex-1 text-left"
                           >
                             {isExpanded ? <ChevronDown className="h-4 w-4 text-orange-500" /> : <ChevronRight className="h-4 w-4 text-orange-400" />}
-                            <span className="text-lg">{especie.icon}</span>
+                            {especie.icon && <span className="text-lg">{especie.icon}</span>}
                             <span className="font-medium text-gray-800">{especie.name}</span>
                             {especie.description && <span className="text-xs text-gray-500 hidden sm:inline">— {especie.description}</span>}
                             <Badge variant="secondary" className="ml-auto mr-2 text-xs">{razasDeEspecie.length} razas</Badge>
@@ -545,7 +549,7 @@ export default function ParametrosModule() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Todas las especies</SelectItem>
-                      {especies.map(e => <SelectItem key={e.id} value={e.id}>{e.icon} {e.name}</SelectItem>)}
+                      {especies.map(e => <SelectItem key={e.id} value={e.id}>{e.icon ? `${e.icon} ${e.name}` : e.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                   <Button onClick={openNewVacuna} className="bg-orange-600 hover:bg-orange-700" size="sm">
@@ -581,7 +585,7 @@ export default function ParametrosModule() {
                         return (
                           <tr key={v.id} className="border-b border-gray-100 hover:bg-gray-50">
                             <td className="py-2 px-3 font-medium text-gray-800">{v.nombreVacuna}</td>
-                            <td className="py-2 px-3 text-gray-600">{especie?.icon} {especie?.name ?? v.especieId}</td>
+                            <td className="py-2 px-3 text-gray-600">{[especie?.icon, especie?.name ?? v.especieId].filter(Boolean).join(" ")}</td>
                             <td className="py-2 px-3 text-center"><Badge variant="secondary">{v.dosis}</Badge></td>
                             <td className="py-2 px-3 text-center text-orange-700 font-medium">{meses}</td>
                             <td className="py-2 px-3 text-gray-500 hidden md:table-cell">{v.descripcion ?? "—"}</td>
@@ -703,12 +707,15 @@ export default function ParametrosModule() {
             <DialogDescription>Complete los datos de la especie.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 mt-2">
-            <div className="grid grid-cols-4 gap-3">
+            <div className="flex items-end gap-3">
               <div className="space-y-2">
-                <Label>Icono (emoji)</Label>
-                <Input value={especieForm.icon} onChange={e => setEspecieForm(p => ({ ...p, icon: e.target.value }))} placeholder="🐕" maxLength={4} />
+                <Label>Icono (opcional)</Label>
+                <EmojiPicker
+                  value={especieForm.icon}
+                  onChange={icon => setEspecieForm(p => ({ ...p, icon }))}
+                />
               </div>
-              <div className="space-y-2 col-span-3">
+              <div className="flex-1 space-y-2">
                 <Label>Nombre <span className="text-red-500">*</span></Label>
                 <Input value={especieForm.name} onChange={e => setEspecieForm(p => ({ ...p, name: e.target.value }))} placeholder="Ej: Perro" />
               </div>
@@ -813,7 +820,7 @@ export default function ParametrosModule() {
               <Select value={vacunaForm.especieId} onValueChange={v => setVacunaForm(p => ({ ...p, especieId: v }))}>
                 <SelectTrigger><SelectValue placeholder="Seleccione especie" /></SelectTrigger>
                 <SelectContent>
-                  {especies.map(e => <SelectItem key={e.id} value={e.id}>{e.icon} {e.name}</SelectItem>)}
+                  {especies.map(e => <SelectItem key={e.id} value={e.id}>{e.icon ? `${e.icon} ${e.name}` : e.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>

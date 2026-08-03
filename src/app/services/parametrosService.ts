@@ -255,10 +255,12 @@ function requireDb(op: string) { if (!db) throw new Error(`[parametrosService] F
 
 export async function registrarEspecie(data: Omit<EspecieParametro, "id" | "createdAt">, createdBy: string): Promise<EspecieParametro> {
   requireDb("registrarEspecie");
-  const payload = { ...data, icon: data.icon || "🐾", description: data.description ?? "", createdBy, active: true, createdAt: serverTimestamp() };
+  // El icono es opcional: se guarda "" si no se eligió ninguno.
+  const icon = data.icon ?? "";
+  const payload = { ...data, icon, description: data.description ?? "", createdBy, active: true, createdAt: serverTimestamp() };
   const ref = await addDoc(collection(db!, "especies"), payload);
   auditParam("CREATE", "especie", ref.id, `Registró la especie "${data.name}"`, { ...data });
-  return { id: ref.id, ...data, icon: data.icon || "🐾", active: true, createdAt: new Date(), createdBy };
+  return { id: ref.id, ...data, icon, active: true, createdAt: new Date(), createdBy };
 }
 export async function modificarEspecie(id: string, data: Partial<EspecieParametro>): Promise<void> {
   requireDb("modificarEspecie");

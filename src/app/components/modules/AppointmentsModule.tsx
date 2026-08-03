@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { useAudit } from "../../context/AuditContext";
-import { Appointment, Client, Pet, AppointmentType, AppointmentStatus, Doctor, DoctorSchedule, TipoEvento, DoctorPerfil, TipoServicioParametro } from "../../types";
+import { Appointment, Client, Pet, AppointmentStatus, Doctor, DoctorSchedule, TipoEvento, DoctorPerfil, TipoServicioParametro } from "../../types";
 import {
   registrarTurno,
   modificarTurno,
@@ -39,6 +39,7 @@ import {
   validateDateRange,
   canEditAppointment,
   validateAppointmentFields,
+  resolveAppointmentKind,
 } from "../../utils/appointmentValidations";
 import { exportToExcel, exportToPDF } from "../../utils/exportUtils";
 import { useSuccessPopup } from "../../context/SuccessPopupContext";
@@ -74,7 +75,8 @@ export default function AppointmentsModule() {
   }, []);
 
   const [formData, setFormData] = useState({
-    type: "clinic" as AppointmentType,
+    // id del documento de /tiposServicio (o literal legado en turnos antiguos)
+    type: "",
     clientId: "",
     petId: "",
     doctorId: "",
@@ -216,6 +218,16 @@ export default function AppointmentsModule() {
     return dynamicType?.color || "bg-gray-100 text-gray-800";
   };
 
+  /** ¿El servicio de este turno es una estadía de guardería? */
+  const isStay = (type?: string) => resolveAppointmentKind(type, tiposServicio) === "stay";
+
+  // Naturaleza del servicio elegido en el formulario. Decide qué campos se
+  // piden (rango de fechas vs. profesional + horario) y cómo se valida.
+  const formKind = useMemo(
+    () => resolveAppointmentKind(formData.type, tiposServicio),
+    [formData.type, tiposServicio]
+  );
+
   // ── Turnos fuera de la ventana suscrita (fetch puntual por fecha) ──
   const [outOfRangeAppointments, setOutOfRangeAppointments] = useState<Appointment[]>([]);
   useEffect(() => {
@@ -252,23 +264,22 @@ export default function AppointmentsModule() {
       .filter(apt => {
         if (!apt || !apt.date) return false;
         if (apt.status === "Cancelado") return false;
-        
-        const dynamicType = tiposServicio.find(t => t.id === apt.type || t.name.toLowerCase() === apt.type.toLowerCase());
-        const isDaycare = dynamicType ? dynamicType.name.toLowerCase().includes("guarder") : apt.type === "daycare";
-        
-        if (!isDaycare) {
+
+        if (!isStay(apt.type)) {
           return isSameDay(new Date(apt.date), selectedDate);
         }
-        if (isDaycare && apt.dateFrom && apt.dateTo) {
+        // Una estadía ocupa todos los días de su rango
+        if (apt.dateFrom && apt.dateTo) {
           const from = new Date(apt.dateFrom); from.setHours(0, 0, 0, 0);
           const to = new Date(apt.dateTo); to.setHours(0, 0, 0, 0);
           const sel = new Date(selectedDate); sel.setHours(0, 0, 0, 0);
           return sel >= from && sel <= to;
         }
-        return false;
+        // Estadía legada sin rango: se muestra en su fecha de alta
+        return isSameDay(new Date(apt.date), selectedDate);
       })
       .sort((a, b) => (a.startTime || "").localeCompare(b.startTime || ""));
-  }, [appointments, selectedDate]);
+  }, [appointments, outOfRangeAppointments, selectedDate, tiposServicio]);
 
   const upcomingAppointments = useMemo(() => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -380,7 +391,7 @@ export default function AppointmentsModule() {
 
   // ── Verificar duplicados ──────────────────────────────────────
   const checkDuplicate = (): boolean => {
-    if (formData.type !== "daycare") {
+    if (formKind === "scheduled") {
       return !!appointments.find(apt =>
         apt.id !== selectedAppointment?.id &&
         apt.clientId === formData.clientId &&
@@ -390,9 +401,10 @@ export default function AppointmentsModule() {
         apt.status !== "Cancelado"
       );
     }
-    if (formData.type === "daycare" && formData.dateFrom && formData.dateTo) {
+    // Estadía: se solapa con otra estadía de la misma mascota
+    if (formData.dateFrom && formData.dateTo) {
       return !!appointments.find(apt => {
-        if (apt.id === selectedAppointment?.id || apt.type !== "daycare" || apt.status === "Cancelado" ||
+        if (apt.id === selectedAppointment?.id || !isStay(apt.type) || apt.status === "Cancelado" ||
           apt.clientId !== formData.clientId || apt.petId !== formData.petId || !apt.dateFrom || !apt.dateTo) return false;
         return formData.dateFrom! <= new Date(apt.dateTo) && formData.dateTo! >= new Date(apt.dateFrom);
       });
@@ -403,18 +415,15 @@ export default function AppointmentsModule() {
   // ── Guardar ──────────────────────────────────────
   const handleSave = async () => {
     const validation = validateAppointmentFields(
-      formData.type, formData.clientId, formData.petId,
-      "skip", // reason field removed from UI — always skip this validation
+      formKind, formData.type, formData.clientId, formData.petId,
       formData.doctorId, formData.startTime, formData.dateFrom, formData.dateTo
     );
     if (!validation.isValid) { toast.error(validation.error); return; }
 
-    if (formData.type !== "daycare") {
+    if (formKind === "scheduled") {
       const dateVal = validateAppointmentDate(formData.date);
       if (!dateVal.isValid) { toast.error(dateVal.error || "No se permiten turnos en fechas pasadas."); return; }
-    }
-
-    if (formData.type === "daycare" && formData.dateFrom && formData.dateTo) {
+    } else if (formData.dateFrom && formData.dateTo) {
       const rangeVal = validateDateRange(formData.dateFrom, formData.dateTo);
       if (!rangeVal.isValid) { toast.error(rangeVal.error); return; }
     }
@@ -429,7 +438,7 @@ export default function AppointmentsModule() {
 
     // FASE 7 — Doble reserva del profesional: mismo doctor, misma fecha y hora,
     // otro turno vigente. Evita solapamientos incluso si el slot no se refrescó.
-    if ((formData.type !== "daycare") && formData.doctorId && formData.startTime) {
+    if (formKind === "scheduled" && formData.doctorId && formData.startTime) {
       const overbooked = appointments.some(apt =>
         apt.id !== selectedAppointment?.id &&
         apt.doctorId === formData.doctorId &&
@@ -446,22 +455,25 @@ export default function AppointmentsModule() {
     try {
       // Shape canónico del documento turno (solo campos en inglés; los slots y
       // la atomicidad los maneja turnoService con writeBatch).
+      const isStayForm = formKind === "stay";
       const appointmentData: Record<string, any> = {
         clientId: formData.clientId,
         petId: formData.petId,
-        doctorId: formData.doctorId || null,
-        date: formData.date,
-        startTime: formData.startTime || null,
-        endTime: formData.startTime ? calcEndTime(formData.startTime) : null,
+        // Una estadía no reserva agenda de un profesional
+        doctorId: isStayForm ? null : (formData.doctorId || null),
+        // Para la estadía, `date` ancla el turno al inicio del rango
+        date: isStayForm ? (formData.dateFrom ?? formData.date) : formData.date,
+        startTime: isStayForm ? null : (formData.startTime || null),
+        endTime: !isStayForm && formData.startTime ? calcEndTime(formData.startTime) : null,
         reason: formData.reason || null,
         notes: formData.notes || null,
         tiposEvento: formData.eventoTipoId ? formData.eventoTipoId.split(",").filter(Boolean) : [],
         type: formData.type,
+        // Siempre presentes: al pasar de estadía a turno normal (o al revés)
+        // hay que limpiar el rango anterior, no dejarlo obsoleto.
+        dateFrom: isStayForm ? (formData.dateFrom ?? null) : null,
+        dateTo: isStayForm ? (formData.dateTo ?? null) : null,
       };
-      if (formData.type === "daycare") {
-        appointmentData.dateFrom = formData.dateFrom ?? null;
-        appointmentData.dateTo = formData.dateTo ?? null;
-      }
 
       if (isEditing && selectedAppointment) {
         // ── Update existing appointment ────────────────────────────────
@@ -521,20 +533,23 @@ export default function AppointmentsModule() {
   };
 
   const handleCancel = () => {
-    setFormData({ type: "clinic", clientId: "", petId: "", doctorId: "", eventoTipoId: "", date: new Date(), startTime: "", endTime: "", dateFrom: undefined, dateTo: undefined, reason: "", notes: "" });
+    setFormData({ type: "", clientId: "", petId: "", doctorId: "", eventoTipoId: "", date: new Date(), startTime: "", endTime: "", dateFrom: undefined, dateTo: undefined, reason: "", notes: "" });
     setSelectedAppointment(null);
     setIsEditing(false);
     setActiveTab("calendar");
   };
 
-  const handleEdit = (apt: Appointment) => {
+  /** Carga un turno en el formulario y abre la pestaña de edición. */
+  const startEditing = (apt: Appointment) => {
     setSelectedAppointment(apt);
     setIsEditing(true);
+    setActiveTab("schedule");
     setFormData({
-      type: apt.type,
+      type: apt.type ?? "",
       clientId: apt.clientId,
       petId: apt.petId,
       doctorId: apt.doctorId || "",
+      eventoTipoId: (apt.tiposEvento ?? []).join(","),
       date: new Date(apt.date),
       startTime: apt.startTime || "",
       endTime: apt.endTime || "",
@@ -581,11 +596,9 @@ export default function AppointmentsModule() {
                 ["Fecha", "Hora", "Tipo", "Mascota", "Cliente", "Profesional", "Estado", "Motivo"],
                 upcomingAppointments.map(apt => [
                   format(new Date(apt.date), "dd/MM/yyyy"),
-                  apt.startTime || ( (() => { 
-                    const dynType = tiposServicio.find(t => t.id === apt.type || t.name.toLowerCase() === apt.type.toLowerCase());
-                    const isGuard = dynType ? dynType.name.toLowerCase().includes("guarder") : apt.type === "daycare";
-                    return isGuard && apt.dateFrom && apt.dateTo ? `${format(new Date(apt.dateFrom), "dd/MM")} - ${format(new Date(apt.dateTo), "dd/MM")}` : "—";
-                  })() ),
+                  apt.startTime || (isStay(apt.type) && apt.dateFrom && apt.dateTo
+                    ? `${format(new Date(apt.dateFrom), "dd/MM")} - ${format(new Date(apt.dateTo), "dd/MM")}`
+                    : "—"),
                   getTypeLabel(apt.type),
                   getPetName(apt.petId),
                   getClientName(apt.clientId),
@@ -728,7 +741,7 @@ export default function AppointmentsModule() {
                                   <span className="text-gray-900">{apt.reason}</span>
                                 </div>
                               )}
-                              {apt.type === "daycare" && apt.dateFrom && apt.dateTo && (
+                              {isStay(apt.type) && apt.dateFrom && apt.dateTo && (
                                 <div className="flex items-start">
                                   <span className="font-medium text-gray-600 min-w-[90px]">Estadía:</span>
                                   <span className="text-gray-900">
@@ -773,7 +786,7 @@ export default function AppointmentsModule() {
                                   size="sm"
                                   variant="ghost"
                                   className="text-orange-600 hover:bg-orange-50 text-xs h-7"
-                                  onClick={() => { setSelectedAppointment(apt); setIsEditing(true); setActiveTab("schedule"); setFormData({ type: apt.type as AppointmentType, clientId: apt.clientId, petId: apt.petId, doctorId: apt.doctorId || "", eventoTipoId: (apt as any).tiposEvento?.join(",") || "", date: new Date(apt.date), startTime: apt.startTime || "", endTime: apt.endTime || "", dateFrom: apt.dateFrom ? new Date(apt.dateFrom) : undefined, dateTo: apt.dateTo ? new Date(apt.dateTo) : undefined, reason: apt.reason || "", notes: apt.notes || "" }); }}
+                                  onClick={() => startEditing(apt)}
                                 >
                                   <Save className="h-3.5 w-3.5 mr-1" />
                                   Editar
@@ -829,7 +842,7 @@ export default function AppointmentsModule() {
                     <Label>Tipo de Servicio <span className="text-red-500">*</span></Label>
                     <Select
                       value={formData.type}
-                      onValueChange={(value: AppointmentType) => setFormData(prev => (
+                      onValueChange={(value) => setFormData(prev => (
                         // Al cambiar el servicio cambia la profesión requerida: se reinicia
                         // el profesional y el horario para no dejar una selección inválida.
                         value === prev.type ? prev : { ...prev, type: value, doctorId: "", startTime: "" }
@@ -839,7 +852,7 @@ export default function AppointmentsModule() {
                       <SelectContent>
                         {tiposServicio.length > 0 ? (
                           tiposServicio.map(ts => (
-                            <SelectItem key={ts.id} value={ts.id as AppointmentType}>{ts.name}</SelectItem>
+                            <SelectItem key={ts.id} value={ts.id}>{ts.name}</SelectItem>
                           ))
                         ) : (
                           <div className="p-3 text-sm text-gray-500 text-center">
@@ -879,11 +892,7 @@ export default function AppointmentsModule() {
                 </div>
 
                 {/* Motivo / Tipos de Evento (multi-selección) */}
-                {(() => {
-                  const dynType = tiposServicio.find(t => t.id === formData.type || t.name.toLowerCase() === formData.type.toLowerCase());
-                  const isGuard = dynType ? dynType.name.toLowerCase().includes("guarder") : formData.type === "daycare";
-                  return !isGuard;
-                })() && tiposEvento.length > 0 && (
+                {formKind === "scheduled" && tiposEvento.length > 0 && (
                   <div className="space-y-2">
                     <Label>Motivo / Tipos de Consulta <span className="text-xs text-gray-400 font-normal">(puede seleccionar varios)</span></Label>
                     <div className="flex flex-wrap gap-2 p-3 border border-gray-200 rounded-lg bg-gray-50/50 min-h-[42px]">
@@ -917,12 +926,8 @@ export default function AppointmentsModule() {
                   </div>
                 )}
 
-                {/* Campos de fecha/hora según tipo */}
-                {(() => {
-                  const dynType = tiposServicio.find(t => t.id === formData.type || t.name.toLowerCase() === formData.type.toLowerCase());
-                  const isGuard = dynType ? dynType.name.toLowerCase().includes("guarder") : formData.type === "daycare";
-                  return !isGuard;
-                })() ? (
+                {/* Campos de fecha/hora según la naturaleza del servicio */}
+                {formKind === "scheduled" ? (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-2">
                       <Label>Fecha <span className="text-red-500">*</span></Label>
@@ -936,7 +941,9 @@ export default function AppointmentsModule() {
                         <PopoverContent className="w-auto p-0" align="start">
                           <Calendar
                             mode="single"
+                            locale={es}
                             selected={formData.date}
+                            defaultMonth={formData.date}
                             onSelect={(date) => { if (date) { setFormData(prev => ({ ...prev, date })); setCalendarOpen(false); } }}
                             disabled={(date) => isBefore(date, startOfDay(new Date()))}
                             initialFocus
@@ -1027,8 +1034,20 @@ export default function AppointmentsModule() {
                         <PopoverContent className="w-auto p-0" align="start">
                           <Calendar
                             mode="single"
+                            locale={es}
                             selected={formData.dateFrom}
-                            onSelect={(date) => { if (date) { setFormData(prev => ({ ...prev, dateFrom: date, date })); setDateFromOpen(false); } }}
+                            defaultMonth={formData.dateFrom}
+                            onSelect={(date) => {
+                              if (!date) return;
+                              setFormData(prev => ({
+                                ...prev,
+                                dateFrom: date,
+                                date,
+                                // Un "hasta" anterior al nuevo "desde" queda inválido
+                                dateTo: prev.dateTo && prev.dateTo < date ? undefined : prev.dateTo,
+                              }));
+                              setDateFromOpen(false);
+                            }}
                             disabled={(date) => isBefore(date, startOfDay(new Date()))}
                             initialFocus
                           />
@@ -1048,9 +1067,11 @@ export default function AppointmentsModule() {
                         <PopoverContent className="w-auto p-0" align="start">
                           <Calendar
                             mode="single"
+                            locale={es}
                             selected={formData.dateTo}
+                            defaultMonth={formData.dateTo ?? formData.dateFrom}
                             onSelect={(date) => { if (date) { setFormData(prev => ({ ...prev, dateTo: date })); setDateToOpen(false); } }}
-                            disabled={(date) => date < (formData.dateFrom || new Date())}
+                            disabled={(date) => isBefore(date, startOfDay(formData.dateFrom ?? new Date()))}
                             initialFocus
                           />
                         </PopoverContent>

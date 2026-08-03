@@ -47,6 +47,8 @@ import { ROLE_META } from "../services/userService";
 import { FIREBASE_CONFIGURED, db } from "../firebase/config";
 import { onSnapshot, collection, query, where, orderBy, limit, Timestamp } from "firebase/firestore";
 
+// Debe coincidir con ModuleType de App.tsx: el botón "Reportes" navega a
+// "reports" y sin ese miembro el destino no estaba cubierto por el tipo.
 type ActiveModule =
   | "dashboard"
   | "clients"
@@ -54,7 +56,11 @@ type ActiveModule =
   | "medical"
   | "appointments"
   | "users"
-  | "profile";
+  | "audit"
+  | "reports"
+  | "profile"
+  | "business_hours"
+  | "parametros";
 
 interface DashboardProps {
   setActiveModule: (module: ActiveModule) => void;

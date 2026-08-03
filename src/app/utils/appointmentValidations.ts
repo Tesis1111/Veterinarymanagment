@@ -1,13 +1,27 @@
 // Backend Validation Functions - Appointments Module
 // Estas funciones simulan validaciones del lado del servidor
 
-import { Appointment, AppointmentType, AppointmentStatus } from "../types";
+import { Appointment, AppointmentStatus } from "../types";
 import { isBefore, startOfDay } from "date-fns";
 
 export interface ValidationResult {
   isValid: boolean;
   error?: string;
 }
+
+/**
+ * Naturaleza del turno, independiente del tipo de servicio configurado.
+ *
+ * Los servicios dejaron de ser literales fijos ("clinic" | "grooming" |
+ * "daycare") y ahora son documentos de /tiposServicio con id autogenerado, así
+ * que comparar el tipo contra esas cadenas nunca coincide. Quien llama resuelve
+ * el servicio a una de estas dos categorías y las validaciones trabajan sobre
+ * ella.
+ *
+ *  • "stay"      — guardería: se reserva un rango de fechas, sin profesional.
+ *  • "scheduled" — turno con profesional y horario concretos.
+ */
+export type AppointmentKind = "stay" | "scheduled";
 
 // Estados terminales: el turno ya no admite cambios.
 // (Los turnos se crean como "Confirmado" y pueden reprogramarse; solo
@@ -102,21 +116,24 @@ export function canDeleteAppointment(appointment: Appointment): ValidationResult
   return { isValid: true };
 }
 
-/**
- * Valida todos los campos requeridos de un turno.
- * El parámetro `reason` se mantiene por compatibilidad pero ya no se valida
- * (el campo fue eliminado de la UI — el motivo se registra como tipo de evento).
- */
+/** Valida todos los campos requeridos de un turno. */
 export function validateAppointmentFields(
-  type: AppointmentType,
+  kind: AppointmentKind,
+  serviceId: string,
   clientId: string,
   petId: string,
-  reason: string, // kept for compatibility, not validated
   doctorId?: string,
   startTime?: string,
   dateFrom?: Date,
   dateTo?: Date
 ): ValidationResult {
+  if (!serviceId) {
+    return {
+      isValid: false,
+      error: "Seleccione el tipo de servicio."
+    };
+  }
+
   if (!clientId || !petId) {
     return {
       isValid: false,
@@ -124,25 +141,40 @@ export function validateAppointmentFields(
     };
   }
 
-  if (type === "clinic" || type === "grooming") {
-    if (!doctorId || !startTime) {
-      return {
-        isValid: false,
-        error: `Para ${type === "clinic" ? "consultas clínicas" : "peluquería"}, debe seleccionar profesional y horario.`
-      };
-    }
+  if (kind === "scheduled" && (!doctorId || !startTime)) {
+    return {
+      isValid: false,
+      error: "Debe seleccionar profesional y horario."
+    };
   }
 
-  if (type === "daycare") {
-    if (!dateFrom || !dateTo) {
-      return {
-        isValid: false,
-        error: "Para guardería, debe seleccionar las fechas desde y hasta."
-      };
-    }
+  if (kind === "stay" && (!dateFrom || !dateTo)) {
+    return {
+      isValid: false,
+      error: "Para guardería, debe seleccionar las fechas desde y hasta."
+    };
   }
 
   return { isValid: true };
+}
+
+/**
+ * Resuelve un tipo de servicio a su naturaleza.
+ *
+ * Acepta tanto los literales legados ("daycare") como los ids de
+ * /tiposServicio, en cuyo caso se decide por el nombre configurado por el
+ * admin (cualquier servicio cuyo nombre contenga "guarder" es una estadía).
+ */
+export function resolveAppointmentKind(
+  serviceType: string | undefined,
+  tiposServicio: { id: string; name: string }[]
+): AppointmentKind {
+  if (!serviceType) return "scheduled";
+  const svc = tiposServicio.find(
+    t => t.id === serviceType || t.name.toLowerCase() === serviceType.toLowerCase()
+  );
+  const name = (svc?.name ?? serviceType).toLowerCase();
+  return name.includes("guarder") || name === "daycare" ? "stay" : "scheduled";
 }
 
 /**

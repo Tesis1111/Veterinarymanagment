@@ -11,7 +11,8 @@ export const convertFileToBase64 = (file: File): Promise<string> => {
 
 export const downloadFile = (attachment: MedicalAttachment) => {
   const link = document.createElement('a');
-  link.href = attachment.fileData;
+  // El contenido del adjunto vive en fileUrl (data URI base64), no en fileData
+  link.href = attachment.fileUrl;
   link.download = attachment.fileName;
   document.body.appendChild(link);
   link.click();

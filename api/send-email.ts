@@ -22,11 +22,70 @@ const esc = (s: unknown): string =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+// ── Estilos inline ────────────────────────────────────────────────────────
+// Los clientes de correo (Gmail app, Outlook.com, Yahoo) descartan el <head> y
+// con él la hoja de estilos: si el diseño depende de clases CSS, el correo
+// llega sin formato. Por eso cada elemento lleva su `style=` inline y el
+// bloque <style> queda solo como refuerzo para los clientes que sí lo soportan.
+const S = {
+  infoBox:
+    'background-color:#fff7ed;border-left:4px solid #f97316;padding:15px;margin:20px 0;border-radius:0 6px 6px 0;',
+  infoP: 'margin:5px 0;color:#374151;font-size:16px;line-height:1.6;',
+  infoLabel: 'font-weight:bold;color:#9a3412;',
+  p: 'margin:0 0 12px 0;color:#374151;font-size:16px;line-height:1.6;',
+  h2: 'margin:0 0 16px 0;color:#1f2937;font-size:20px;font-weight:bold;line-height:1.3;',
+} as const;
+
 // Renderiza una fila de la caja de información solo si el valor tiene contenido.
 const infoRow = (label: string, value: unknown): string =>
   value !== undefined && value !== null && String(value).trim() !== ''
-    ? `<p><span class="info-label">${esc(label)}</span> ${esc(value)}</p>`
+    ? `<p style="${S.infoP}"><span style="${S.infoLabel}">${esc(label)}</span> ${esc(value)}</p>`
     : '';
+
+/** Caja de información naranja (todas las filas ya escapadas por infoRow). */
+const infoBox = (rows: string): string => `<div style="${S.infoBox}">${rows}</div>`;
+
+/** Párrafo del cuerpo. El contenido HTML ya debe venir escapado. */
+const p = (html: string): string => `<p style="${S.p}">${html}</p>`;
+
+/** Título de la sección. */
+const h2 = (html: string): string => `<h2 style="${S.h2}">${html}</h2>`;
+
+/**
+ * Versión text/plain del correo, derivada del HTML final.
+ *
+ * Resend NO genera la parte text/plain automáticamente: si solo se envía
+ * `html`, cualquier lector que no interprete HTML (cliente en modo texto,
+ * pestaña "Plain Text" del panel de Resend, pasarelas corporativas, lectores
+ * de pantalla) termina mostrando el marcado crudo. Enviar `text` junto a
+ * `html` produce un multipart/alternative correcto y además mejora la
+ * reputación anti-spam del remitente.
+ */
+function htmlToText(html: string): string {
+  return html
+    // <head> (incluye <style> y <title>) no aporta texto legible
+    .replace(/<head[\s\S]*?<\/head>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    // Saltos de línea a partir de la estructura del documento
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|h1|h2|h3|tr|li)>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
+    // Resto de etiquetas
+    .replace(/<[^>]+>/g, '')
+    // Entidades introducidas por esc()
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    // Normaliza espacios y líneas en blanco sobrantes
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_SUBJECT_LEN = 200;
@@ -98,44 +157,53 @@ function isRateLimited(uid: string): boolean {
   return bucket.count > RATE_MAX_PER_WINDOW;
 }
 
-// Plantilla base para todos los correos
-const baseTemplate = (title: string, content: string) => `
-<!DOCTYPE html>
-<html>
+// Plantilla base para todos los correos.
+// Maquetada con <table> y estilos inline: es el único layout que renderiza
+// igual en Gmail, Outlook (motor Word) y Apple Mail. Los <div> con flex/grid
+// y las clases CSS del <head> no son fiables en correo.
+const FONT = "font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;";
+
+const baseTemplate = (title: string, content: string) => `<!DOCTYPE html>
+<html lang="es">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${esc(title)}</title>
   <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f9fafb; margin: 0; padding: 0; }
-    .container { max-w-lg mx-auto; max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); margin-top: 20px; margin-bottom: 20px; }
-    .header { background-color: #f97316; padding: 30px 20px; text-align: center; color: white; }
-    .header h1 { margin: 0; font-size: 24px; font-weight: bold; }
+    body { ${FONT} background-color: #f9fafb; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; }
+    .header { background-color: #f97316; padding: 30px 20px; text-align: center; color: #ffffff; }
     .content { padding: 30px; color: #374151; line-height: 1.6; font-size: 16px; }
-    .content h2 { color: #1f2937; font-size: 20px; margin-top: 0; }
     .footer { background-color: #f3f4f6; padding: 20px; text-align: center; color: #6b7280; font-size: 14px; }
-    .button { display: inline-block; padding: 12px 24px; background-color: #f97316; color: white !important; text-decoration: none; border-radius: 6px; font-weight: bold; margin-top: 15px; margin-bottom: 15px; }
-    .info-box { background-color: #fff7ed; border-left: 4px solid #f97316; padding: 15px; margin: 20px 0; border-radius: 0 6px 6px 0; }
-    .info-box p { margin: 5px 0; }
-    .info-label { font-weight: bold; color: #9a3412; }
   </style>
 </head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>🐾 Veterinaria Leo</h1>
-    </div>
-    <div class="content">
-      ${content}
-    </div>
-    <div class="footer">
-      <p>Veterinaria Leo - Cuidando a tus mejores amigos</p>
-      <p>Si tienes alguna consulta, no dudes en contactarnos.</p>
-    </div>
-  </div>
+<body style="${FONT}background-color:#f9fafb;margin:0;padding:0;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f9fafb;padding:20px 10px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;">
+          <tr>
+            <td class="header" style="background-color:#f97316;padding:30px 20px;text-align:center;">
+              <h1 style="margin:0;${FONT}font-size:24px;font-weight:bold;color:#ffffff;">🐾 Veterinaria Leo</h1>
+            </td>
+          </tr>
+          <tr>
+            <td class="content" style="padding:30px;${FONT}color:#374151;line-height:1.6;font-size:16px;">
+              ${content}
+            </td>
+          </tr>
+          <tr>
+            <td class="footer" style="background-color:#f3f4f6;padding:20px;text-align:center;${FONT}color:#6b7280;font-size:14px;">
+              <p style="margin:0 0 6px 0;">Veterinaria Leo - Cuidando a tus mejores amigos</p>
+              <p style="margin:0;">Si tienes alguna consulta, no dudes en contactarnos.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
-</html>
-`;
+</html>`;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -196,82 +264,83 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'appointment_created':
         htmlContent = baseTemplate(
           'Turno Confirmado',
-          `<h2>¡Hola ${esc(data.clientName)}!</h2>
-           <p>Te confirmamos que el turno para <strong>${esc(data.petName)}</strong> ha sido agendado exitosamente.</p>
-           <div class="info-box">
-             <p><span class="info-label">📅 Fecha:</span> ${esc(data.date)}</p>
-             <p><span class="info-label">🕒 Hora:</span> ${esc(data.time)}</p>
-             <p><span class="info-label">👨‍⚕️ Veterinario:</span> ${esc(data.doctorName)}</p>
-             <p><span class="info-label">🏥 Motivo:</span> ${esc(data.reason)}</p>
-           </div>
-           <p>Por favor, recuerda llegar 10 minutos antes. ¡Los esperamos!</p>`
+          `${h2(`¡Hola ${esc(data.clientName)}!`)}
+           ${p(`Te confirmamos que el turno para <strong>${esc(data.petName)}</strong> ha sido agendado exitosamente.`)}
+           ${infoBox(`
+             ${infoRow('📅 Fecha:', data.date)}
+             ${infoRow('🕒 Hora:', data.time)}
+             ${infoRow('👨‍⚕️ Veterinario:', data.doctorName)}
+             ${infoRow('🏥 Motivo:', data.reason)}
+           `)}
+           ${p('Por favor, recuerda llegar 10 minutos antes. ¡Los esperamos!')}`
         );
         break;
 
       case 'appointment_cancelled':
         htmlContent = baseTemplate(
           'Turno Cancelado',
-          `<h2>Hola ${esc(data.clientName)},</h2>
-           <p>Te informamos que el turno de <strong>${esc(data.petName)}</strong> ha sido cancelado.</p>
-           <div class="info-box">
-             <p><span class="info-label">📅 Fecha original:</span> ${esc(data.date)}</p>
-             <p><span class="info-label">🕒 Hora original:</span> ${esc(data.time)}</p>
-           </div>
-           <p>Si deseas reprogramarlo, puedes contactarnos o gestionarlo a través de nuestro sistema.</p>`
+          `${h2(`Hola ${esc(data.clientName)},`)}
+           ${p(`Te informamos que el turno de <strong>${esc(data.petName)}</strong> ha sido cancelado.`)}
+           ${infoBox(`
+             ${infoRow('📅 Fecha original:', data.date)}
+             ${infoRow('🕒 Hora original:', data.time)}
+           `)}
+           ${p('Si deseas reprogramarlo, puedes contactarnos o gestionarlo a través de nuestro sistema.')}`
         );
         break;
 
       case 'appointment_rescheduled':
         htmlContent = baseTemplate(
           'Turno Reprogramado',
-          `<h2>Hola ${esc(data.clientName)},</h2>
-           <p>El turno de <strong>${esc(data.petName)}</strong> ha sido reprogramado con éxito.</p>
-           <div class="info-box">
-             <p><span class="info-label">❌ Fecha anterior:</span> ${esc(data.oldDate)} a las ${esc(data.oldTime)}</p>
-             <p><span class="info-label">✅ Nueva Fecha:</span> ${esc(data.newDate)}</p>
-             <p><span class="info-label">✅ Nueva Hora:</span> ${esc(data.newTime)}</p>
-           </div>
-           <p>¡Nos vemos pronto!</p>`
+          `${h2(`Hola ${esc(data.clientName)},`)}
+           ${p(`El turno de <strong>${esc(data.petName)}</strong> ha sido reprogramado con éxito.`)}
+           ${infoBox(`
+             ${infoRow('❌ Fecha anterior:', `${data.oldDate ?? ''} a las ${data.oldTime ?? ''}`)}
+             ${infoRow('✅ Nueva Fecha:', data.newDate)}
+             ${infoRow('✅ Nueva Hora:', data.newTime)}
+           `)}
+           ${p('¡Nos vemos pronto!')}`
         );
         break;
 
       case 'welcome':
         htmlContent = baseTemplate(
           '¡Bienvenido a Veterinaria Leo!',
-          `<h2>¡Hola ${esc(data.clientName)}!</h2>
-           <p>Queremos darte la bienvenida a nuestra familia. En <strong>Veterinaria Leo</strong> estamos felices de poder cuidar la salud y bienestar de tus mascotas.</p>
-           <p>Ya puedes comenzar a gestionar tus turnos y acceder al historial clínico a través de nuestro sistema.</p>`
+          `${h2(`¡Hola ${esc(data.clientName)}!`)}
+           ${p('Queremos darte la bienvenida a nuestra familia. En <strong>Veterinaria Leo</strong> estamos felices de poder cuidar la salud y bienestar de tus mascotas.')}
+           ${p('Ya puedes comenzar a gestionar tus turnos y acceder al historial clínico a través de nuestro sistema.')}`
         );
         break;
 
       case 'pet_registered':
         htmlContent = baseTemplate(
           'Mascota Registrada',
-          `<h2>¡Hola ${esc(data.clientName)}!</h2>
-           <p>Te confirmamos que tu mascota <strong>${esc(data.petName)}</strong> ha sido registrada correctamente en nuestro sistema.</p>
-           <div class="info-box">
-             <p><span class="info-label">🐾 Mascota:</span> ${esc(data.petName)}</p>
-             <p><span class="info-label">🧬 Especie/Raza:</span> ${esc(data.species)} - ${esc(data.breed)}</p>
-           </div>
-           <p>Ya podemos empezar a llevar su historial clínico al día. ¡Gracias por confiar en nosotros!</p>`
+          `${h2(`¡Hola ${esc(data.clientName)}!`)}
+           ${p(`Te confirmamos que tu mascota <strong>${esc(data.petName)}</strong> ha sido registrada correctamente en nuestro sistema.`)}
+           ${infoBox(`
+             ${infoRow('🐾 Mascota:', data.petName)}
+             ${infoRow('🧬 Especie:', data.species)}
+             ${infoRow('🏷️ Raza:', data.breed)}
+           `)}
+           ${p('Ya podemos empezar a llevar su historial clínico al día. ¡Gracias por confiar en nosotros!')}`
         );
         break;
 
       case 'clinical_history':
         htmlContent = baseTemplate(
           'Historial Clínico',
-          `<h2>Hola ${esc(data.clientName)},</h2>
-           <p>Adjunto a este correo encontrarás el historial clínico actualizado de <strong>${esc(data.petName)}</strong>.</p>
-           <p>Si tienes alguna duda sobre las indicaciones o los registros, no dudes en consultarnos.</p>`
+          `${h2(`Hola ${esc(data.clientName)},`)}
+           ${p(`Adjunto a este correo encontrarás el historial clínico actualizado de <strong>${esc(data.petName)}</strong>.`)}
+           ${p('Si tienes alguna duda sobre las indicaciones o los registros, no dudes en consultarnos.')}`
         );
         break;
 
       case 'clinical_record':
         htmlContent = baseTemplate(
           'Registro de Historial Clínico',
-          `<h2>Hola ${esc(data.clientName)},</h2>
-           <p>Compartimos contigo el detalle del registro clínico de <strong>${esc(data.petName)}</strong>.</p>
-           <div class="info-box">
+          `${h2(`Hola ${esc(data.clientName)},`)}
+           ${p(`Compartimos contigo el detalle del registro clínico de <strong>${esc(data.petName)}</strong>.`)}
+           ${infoBox(`
              ${infoRow('🐾 Mascota:', data.petName)}
              ${infoRow('📅 Fecha:', data.date)}
              ${infoRow('🏥 Tipo de evento:', data.eventType)}
@@ -286,18 +355,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
              ${infoRow('📝 Descripción:', data.description)}
              ${infoRow('🗒️ Observaciones:', data.notes)}
              ${infoRow('🔔 Próximo control:', data.nextAppointmentDate)}
-           </div>
-           ${data.hasAttachments ? '<p>📎 Adjuntamos a este correo los archivos e imágenes asociados a este registro.</p>' : ''}
-           <p>Si tienes alguna duda sobre las indicaciones o los registros, no dudes en consultarnos.</p>`
+           `)}
+           ${data.hasAttachments ? p('📎 Adjuntamos a este correo los archivos e imágenes asociados a este registro.') : ''}
+           ${p('Si tienes alguna duda sobre las indicaciones o los registros, no dudes en consultarnos.')}`
         );
         break;
 
       case 'admin_password_recovery':
         htmlContent = baseTemplate(
           'Solicitud de recuperación de contraseña',
-          `<h2>Nueva solicitud de recuperación de contraseña</h2>
-           <p>Se ha registrado una solicitud de restablecimiento de contraseña en el sistema.</p>
-           <div class="info-box">
+          `${h2('Nueva solicitud de recuperación de contraseña')}
+           ${p('Se ha registrado una solicitud de restablecimiento de contraseña en el sistema.')}
+           ${infoBox(`
              ${infoRow('📧 Correo solicitado:', data.recoveryEmail)}
              ${infoRow('📅 Fecha:', data.date)}
              ${infoRow('🕒 Hora:', data.time)}
@@ -306,17 +375,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
              ${infoRow('🖥️ Sistema:', data.os)}
              ${infoRow('📍 Origen:', data.origin)}
              ${infoRow('✅ Estado:', data.status)}
-           </div>
-           <p>Este es un aviso automático de seguridad. Si no reconoces esta actividad, revisa el registro de auditoría del sistema.</p>`
+           `)}
+           ${p('Este es un aviso automático de seguridad. Si no reconoces esta actividad, revisa el registro de auditoría del sistema.')}`
         );
         break;
 
       case 'admin_password_recovery_error':
         htmlContent = baseTemplate(
           'Error en recuperación de contraseña',
-          `<h2>⚠️ Error al procesar una recuperación de contraseña</h2>
-           <p>Se produjo un error al intentar procesar una solicitud de restablecimiento de contraseña.</p>
-           <div class="info-box">
+          `${h2('⚠️ Error al procesar una recuperación de contraseña')}
+           ${p('Se produjo un error al intentar procesar una solicitud de restablecimiento de contraseña.')}
+           ${infoBox(`
              ${infoRow('📧 Correo solicitado:', data.recoveryEmail)}
              ${infoRow('📅 Fecha:', data.date)}
              ${infoRow('🕒 Hora:', data.time)}
@@ -326,22 +395,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
              ${infoRow('📍 Origen:', data.origin)}
              ${infoRow('❌ Estado:', data.status)}
              ${infoRow('🔎 Detalle:', data.errorDetails)}
-           </div>
-           <p>Este es un aviso automático de seguridad. Revisa la configuración de autenticación si el error persiste.</p>`
+           `)}
+           ${p('Este es un aviso automático de seguridad. Revisa la configuración de autenticación si el error persiste.')}`
         );
         break;
 
       case 'reminder':
         htmlContent = baseTemplate(
           'Recordatorio Importante',
-          `<h2>Hola ${esc(data.clientName)},</h2>
-           <p>Queremos recordarte sobre una fecha importante para <strong>${esc(data.petName)}</strong>.</p>
-           <div class="info-box">
-             <p><span class="info-label">🔔 Tipo:</span> ${esc(data.reminderType)}</p>
-             <p><span class="info-label">📅 Fecha aproximada:</span> ${esc(data.date)}</p>
-             <p><span class="info-label">📝 Detalle:</span> ${esc(data.notes)}</p>
-           </div>
-           <p>Contactanos para agendar un turno lo antes posible para mantener su calendario al día.</p>`
+          `${h2(`Hola ${esc(data.clientName)},`)}
+           ${p(`Queremos recordarte sobre una fecha importante para <strong>${esc(data.petName)}</strong>.`)}
+           ${infoBox(`
+             ${infoRow('🔔 Tipo:', data.reminderType)}
+             ${infoRow('📅 Fecha aproximada:', data.date)}
+             ${infoRow('📝 Detalle:', data.notes)}
+           `)}
+           ${p('Contactanos para agendar un turno lo antes posible para mantener su calendario al día.')}`
         );
         break;
 
@@ -352,12 +421,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'Tipo de correo no soportado' });
     }
 
-    // Configurar el objeto de envío
+    // Configurar el objeto de envío.
+    // `text` acompaña siempre a `html`: sin la parte text/plain, un lector que
+    // no interprete HTML muestra el marcado crudo en lugar del mensaje.
     const emailPayload: any = {
       from: EMAIL_FROM,
       to,
       subject,
       html: htmlContent,
+      text: htmlToText(htmlContent),
     };
 
     // Agregar adjuntos si existen. Se soportan dos formatos:

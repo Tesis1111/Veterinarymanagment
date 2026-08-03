@@ -1,12 +1,14 @@
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { Client, Pet } from "../../types";
+// Nota: clienteService.reactivarCliente() sigue existiendo y funciona, pero la
+// UI ya no expone el botón "Reactivar" (era el único punto de entrada y estaba
+// roto). Si se quiere reponer, basta con volver a llamarlo desde la lista.
 import {
   traerClientes,
   registrarCliente,
   asociarCliente,
   eliminarCliente,
-  reactivarCliente,
   eliminarClienteFisico,
   ValidarUnicidadCliente,
   contarDependenciasCliente,
@@ -23,7 +25,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { Search, UserPlus, Save, X, Trash2, Edit, Users, FileSpreadsheet, FileText, HelpCircle, List, RotateCcw, ShieldAlert } from "lucide-react";
+import { Search, UserPlus, Save, X, Trash2, Edit, Users, FileSpreadsheet, FileText, HelpCircle, List, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { exportToExcel, exportToPDF } from "../../utils/exportUtils";
@@ -148,15 +150,6 @@ export default function ClientsModule() {
       })
       .sort((a, b) => a.fullName.localeCompare(b.fullName, "es"));
   }, [clients, searchTerm, statusFilter]);
-
-  const handleStatusChange = async (client: Client, newStatus: boolean) => {
-    try {
-      await modificarCliente(client.id, { deleted: newStatus });
-      showSuccess(`Cliente ${client.fullName} ${newStatus ? 'dado de baja' : 'reactivado'} exitosamente.`);
-    } catch {
-      toast.error("Error al actualizar estado del cliente.");
-    }
-  };
 
   const handlePurge = async () => {
     if (!clientToPurge) return;
@@ -595,30 +588,21 @@ export default function ClientsModule() {
                         <TableCell className="text-center">
                           <div className="flex items-center justify-center gap-1">
                             {client.deleted ? (
-                              <>
-                                {canManage && (
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() => handleReactivate(client)}
-                                    className="text-green-600 hover:text-green-700 hover:bg-green-50"
-                                  >
-                                    <RotateCcw className="h-4 w-4 mr-1" />
-                                    Reactivar
-                                  </Button>
-                                )}
-                                {isAdmin && (
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() => setClientToPurge(client)}
-                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                                  >
-                                    <Trash2 className="h-4 w-4 mr-1" />
-                                    Eliminar
-                                  </Button>
-                                )}
-                              </>
+                              // Cliente dado de baja: solo el admin puede purgarlo.
+                              // (No se ofrece reactivar: ver nota en el import de clienteService.)
+                              isAdmin ? (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => setClientToPurge(client)}
+                                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-1" />
+                                  Eliminar
+                                </Button>
+                              ) : (
+                                <span className="text-xs text-gray-400">—</span>
+                              )
                             ) : (
                               canManage && (
                                 <Button

@@ -37,6 +37,10 @@ import { exportToExcel, exportToPDF } from "../../utils/exportUtils";
 import { useSuccessPopup } from "../../context/SuccessPopupContext";
 import { sendPetRegistered } from "../../services/resendService";
 
+// Año más antiguo ofrecido en el selector de fecha de nacimiento. 40 años cubre
+// de sobra la longevidad de cualquier especie atendida en la clínica.
+const MIN_BIRTH_YEAR = new Date().getFullYear() - 40;
+
 export default function PetsModuleEnhanced() {
   const { user, isAdmin, hasPermission } = useAuth();
   // Gate de escritura: coincide con firestore.rules (write de /mascotas solo
@@ -250,9 +254,11 @@ export default function PetsModuleEnhanced() {
     return fromFirestore;
   }, [selectedSpeciesId, todasLasRazas]);
 
-  // Helper: resolve display names from dynamic data (fallback to static)
-  const getSpeciesName = (id: string) => especies.find(e => e.id === id)?.name ?? getSpeciesNameStatic(id);
-  const getBreedName = (id: string) => todasLasRazas.find(r => r.id === id)?.name ?? getBreedNameStatic(id);
+  // Resuelven el nombre visible desde los parámetros dinámicos (Firestore).
+  // Si el id no existe (raza sin elegir, especie borrada) devuelven "" en lugar
+  // de romper: son datos opcionales que se muestran tal cual en la ficha.
+  const getSpeciesName = (id?: string) => especies.find(e => e.id === id)?.name ?? "";
+  const getBreedName = (id?: string) => todasLasRazas.find(r => r.id === id)?.name ?? "";
 
   const selectPet = (pet: Pet) => {
     setSelectedPet(pet);
@@ -287,10 +293,12 @@ export default function PetsModuleEnhanced() {
     try {
       const petToSave: any = {
         name: formData.name,
+        speciesId: formData.speciesId,
         breedId: formData.breedId || formData.speciesId,
         sex: formData.sex as Pet["sex"],
         clientId: formData.clientId,
-        birthDate: formData.birthDate ? formData.birthDate.toISOString() : undefined,
+        // Firestore rechaza `undefined`: sin fecha se guarda null explícito.
+        birthDate: formData.birthDate ? formData.birthDate.toISOString() : null,
         color: formData.colorObservations,
         observations: formData.colorObservations,
         species: getSpeciesName(formData.speciesId),
@@ -329,8 +337,8 @@ export default function PetsModuleEnhanced() {
           sendPetRegistered(client.email, {
             clientName: client.fullName,
             petName: petToSave.name,
-            species: getSpeciesName(petToSave.speciesId),
-            breed: getBreedName(petToSave.speciesId, petToSave.breedId)
+            species: petToSave.species || "Sin especificar",
+            breed: petToSave.race || "Sin especificar",
           }).catch(() => toast.warning("La mascota se registró, pero no se pudo enviar el correo al cliente"));
         }
       }
@@ -425,7 +433,7 @@ export default function PetsModuleEnhanced() {
     setSelectedPet(null);
   };
 
-  const handleChangeOwner = () => {
+  const handleChangeOwner = async () => {
     if (!selectedPet) return;
     if (!changeOwnerForm.newClientId) {
       toast.error("Seleccione el nuevo dueño");
@@ -449,25 +457,25 @@ export default function PetsModuleEnhanced() {
       recordedBy: user?.id || "1"
     };
 
-    setPets(prev =>
-      prev.map(pet =>
-        pet.id === selectedPet.id
-          ? {
-              ...pet,
-              clientId: changeOwnerForm.newClientId,
-              ownershipHistory: [...(pet.ownershipHistory || []), ownershipChange],
-              updatedAt: new Date(),
-              updatedBy: user?.id || "1"
-            }
-          : pet
-      )
-    );
-
-    toast.success(`${selectedPet.name} ahora pertenece a ${getClientName(changeOwnerForm.newClientId)}`);
-    addLog("Actualizar", "Mascotas", `Cambio de dueño: ${selectedPet.name} → ${getClientName(changeOwnerForm.newClientId)}`);
-    setChangeOwnerDialogOpen(false);
-    setChangeOwnerForm({ newClientId: "", reason: "", notes: "" });
-    setSelectedPet(null);
+    try {
+      // Persistir en Firestore: antes solo se actualizaba el estado local y el
+      // cambio se perdía al recargar (onSnapshot lo pisaba con el dato viejo).
+      await modificarMascota(
+        selectedPet.id,
+        {
+          clientId: changeOwnerForm.newClientId,
+          ownershipHistory: [...(selectedPet.ownershipHistory || []), ownershipChange],
+        } as any,
+        user?.id || "1"
+      );
+      toast.success(`${selectedPet.name} ahora pertenece a ${getClientName(changeOwnerForm.newClientId)}`);
+      addLog("Actualizar", "Mascotas", `Cambio de dueño: ${selectedPet.name} → ${getClientName(changeOwnerForm.newClientId)}`);
+      setChangeOwnerDialogOpen(false);
+      setChangeOwnerForm({ newClientId: "", reason: "", notes: "" });
+      setSelectedPet(null);
+    } catch {
+      toast.error("Error al cambiar el dueño de la mascota.");
+    }
   };
 
   const getSpeciesBadgeColor = (speciesId: string) => {
@@ -643,7 +651,7 @@ export default function PetsModuleEnhanced() {
                 <SelectContent>
                   {especies.map(species => (
                     <SelectItem key={species.id} value={species.id}>
-                      {(species as any).icon} {species.name}
+                      {species.icon ? `${species.icon} ${species.name}` : species.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -707,7 +715,14 @@ export default function PetsModuleEnhanced() {
                   <PopoverContent className="w-auto p-0" align="start">
                     <Calendar
                       mode="single"
+                      locale={es}
                       selected={formData.birthDate}
+                      // Una fecha de nacimiento suele estar años atrás: sin los
+                      // selectores de mes/año habría que retroceder mes a mes.
+                      captionLayout="dropdown-buttons"
+                      fromYear={MIN_BIRTH_YEAR}
+                      toYear={new Date().getFullYear()}
+                      defaultMonth={formData.birthDate ?? new Date()}
                       onSelect={(date) => {
                         if (date && date > new Date()) {
                           toast.error("La fecha de nacimiento no puede ser una fecha futura.");
@@ -816,7 +831,7 @@ export default function PetsModuleEnhanced() {
                     <SelectItem value="all">Todas las especies</SelectItem>
                     {especies.map(species => (
                       <SelectItem key={species.id} value={(species as any).name ?? species.name}>
-                        {(species as any).icon} {species.name}
+                        {species.icon ? `${species.icon} ${species.name}` : species.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1180,13 +1195,17 @@ export default function PetsModuleEnhanced() {
                 <PopoverContent className="w-auto p-0" align="start">
                   <Calendar
                     mode="single"
+                    locale={es}
                     selected={deceasedForm.deceasedDate}
+                    defaultMonth={deceasedForm.deceasedDate}
                     onSelect={(date) => {
                       if (date) {
                         setDeceasedForm(prev => ({ ...prev, deceasedDate: date }));
                         setDeceasedCalendarOpen(false);
                       }
                     }}
+                    // Una baja no puede registrarse en el futuro
+                    disabled={{ after: new Date() }}
                     initialFocus
                   />
                 </PopoverContent>

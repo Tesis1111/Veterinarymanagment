@@ -22,7 +22,20 @@ function Calendar({
         months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
         month: "space-y-4 w-full",
         caption: "flex justify-center pt-2 relative items-center",
-        caption_label: "text-base font-bold text-gray-800 capitalize",
+        caption_label: "flex items-center text-base font-bold text-gray-800 capitalize",
+        // Selectores de mes/año (captionLayout="dropdown-buttons").
+        // react-day-picker dibuja, dentro de cada dropdown, un <select> real y
+        // un div decorativo con el texto. Se replica su técnica: el <select>
+        // va superpuesto y transparente, y el texto visible es el div.
+        caption_dropdowns: "flex items-center justify-center gap-2",
+        dropdown_month:
+          "relative inline-flex items-center rounded-md border border-gray-200 px-2 py-1 hover:border-orange-300 focus-within:ring-2 focus-within:ring-orange-500",
+        dropdown_year:
+          "relative inline-flex items-center rounded-md border border-gray-200 px-2 py-1 hover:border-orange-300 focus-within:ring-2 focus-within:ring-orange-500",
+        dropdown:
+          "absolute inset-0 z-10 h-full w-full cursor-pointer appearance-none border-0 bg-transparent opacity-0",
+        dropdown_icon: "ml-1 h-4 w-4 text-gray-500",
+        vhidden: "sr-only",
         nav: "space-x-1 flex items-center",
         nav_button: cn(
           buttonVariants({ variant: "outline" }),
