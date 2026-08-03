@@ -40,6 +40,7 @@ import {
   canEditAppointment,
   validateAppointmentFields,
   resolveAppointmentKind,
+  isAppointmentOverdue,
 } from "../../utils/appointmentValidations";
 import { exportToExcel, exportToPDF } from "../../utils/exportUtils";
 import { useSuccessPopup } from "../../context/SuccessPopupContext";
@@ -201,6 +202,7 @@ export default function AppointmentsModule() {
       case "Programado": return "bg-blue-100 text-blue-800";
       case "Confirmado": return "bg-green-100 text-green-800";
       case "Completado": return "bg-gray-100 text-gray-800";
+      case "No asistió": return "bg-amber-100 text-amber-800";
       case "Cancelado": return "bg-red-100 text-red-800";
       default: return "bg-gray-100 text-gray-800";
     }
@@ -288,12 +290,66 @@ export default function AppointmentsModule() {
         if (!apt || !apt.date) return false;
         try {
           const aptDate = new Date(apt.date); aptDate.setHours(0, 0, 0, 0);
-          return aptDate >= today && apt.status !== "Cancelado" && apt.status !== "Completado";
+          return aptDate >= today && !["Cancelado", "Completado", "No asistió"].includes(apt.status);
         } catch { return false; }
       })
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
       .slice(0, 12);
   }, [appointments]);
+
+  // ── Turnos vencidos pendientes de cierre ────────────────────────────
+  // Los turnos nacen "Confirmado" y nada los cierra solo: sin esta bandeja
+  // quedan abiertos para siempre y encima desaparecen de la vista, porque
+  // "Próximos turnos" solo mira fechas futuras.
+  const overdueAppointments = useMemo(() => {
+    return (appointments ?? [])
+      .filter(apt => apt && apt.date && isAppointmentOverdue(apt))
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  }, [appointments]);
+
+  const [closingIds, setClosingIds] = useState<string[]>([]);
+
+  /** Cierra un turno vencido. modificarTurno libera el slot del profesional. */
+  const closeOverdue = async (apt: Appointment, status: AppointmentStatus) => {
+    setClosingIds(prev => [...prev, apt.id]);
+    try {
+      if (status === "Cancelado") {
+        await cancelarTurno(apt.id, "Cerrado desde pendientes de cierre", user?.id || "1");
+      } else {
+        await modificarTurno(apt.id, { status }, user?.id || "1");
+      }
+      addLog("Actualizar", "turnos", `Turno vencido de ${getPetName(apt.petId)} → ${status}`);
+    } catch (err: any) {
+      toast.error(
+        err?.code === "permission-denied"
+          ? "Sin permisos para cerrar el turno."
+          : "Error al cerrar el turno."
+      );
+    } finally {
+      setClosingIds(prev => prev.filter(id => id !== apt.id));
+    }
+  };
+
+  /** Cierra en bloque todos los vencidos como inasistencia. */
+  const closeAllOverdue = async () => {
+    const pending = [...overdueAppointments];
+    let ok = 0;
+    for (const apt of pending) {
+      try {
+        await modificarTurno(apt.id, { status: "No asistió" }, user?.id || "1");
+        ok++;
+      } catch {
+        // Se sigue con el resto: un fallo puntual no debe abortar el lote
+      }
+    }
+    if (ok > 0) {
+      showSuccess(`${ok} turno${ok !== 1 ? "s" : ""} cerrado${ok !== 1 ? "s" : ""} como "No asistió".`);
+      addLog("Actualizar", "turnos", `Cierre masivo de ${ok} turnos vencidos como No asistió`);
+    }
+    if (ok < pending.length) {
+      toast.error(`No se pudieron cerrar ${pending.length - ok} turnos.`);
+    }
+  };
 
   const isWithin24Hours = (apt: Appointment): boolean => {
     const now = new Date();
@@ -640,6 +696,97 @@ export default function AppointmentsModule() {
         </div>
       </div>
 
+      {/* ══ PENDIENTES DE CIERRE ═══════════════════════════
+          Turnos cuya fecha ya pasó y siguen sin resolverse. El sistema no los
+          cierra solo: marcar "Completado" sin saber si la mascota asistió
+          falsearía el historial clínico. */}
+      {overdueAppointments.length > 0 && hasPermission("manage_appointments") && (
+        <Card className="border-amber-300 bg-amber-50/40 shadow-md">
+          <CardHeader className="pb-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-amber-800">
+                  <AlertTriangle className="h-5 w-5" />
+                  Pendientes de cierre ({overdueAppointments.length})
+                </CardTitle>
+                <CardDescription className="text-amber-700/80">
+                  Estos turnos ya pasaron y siguen abiertos. Indicá qué ocurrió para cerrarlos.
+                </CardDescription>
+              </div>
+              {overdueAppointments.length > 1 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={closeAllOverdue}
+                  disabled={closingIds.length > 0}
+                  className="border-amber-400 text-amber-800 hover:bg-amber-100 shrink-0"
+                >
+                  <XCircle className="mr-2 h-4 w-4" />
+                  Cerrar todos como «No asistió»
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+              {overdueAppointments.map(apt => {
+                const busy = closingIds.includes(apt.id);
+                return (
+                  <div
+                    key={apt.id}
+                    className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0 text-sm">
+                      <p className="font-medium text-gray-900">
+                        {format(new Date(apt.date), "dd/MM/yyyy")}
+                        {apt.startTime && <span className="text-gray-500"> · {apt.startTime}</span>}
+                      </p>
+                      <p className="truncate text-gray-600">
+                        {getPetName(apt.petId)} — {getClientName(apt.clientId)}
+                        {apt.doctorId && (
+                          <span className="text-gray-400"> · {getDoctorName(apt.doctorId)}</span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 shrink-0">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => closeOverdue(apt, "Completado")}
+                        className="h-7 border-green-300 text-green-700 hover:bg-green-50 text-xs"
+                      >
+                        <CheckCircle className="mr-1 h-3.5 w-3.5" />
+                        Se atendió
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => closeOverdue(apt, "No asistió")}
+                        className="h-7 border-amber-400 text-amber-800 hover:bg-amber-100 text-xs"
+                      >
+                        <XCircle className="mr-1 h-3.5 w-3.5" />
+                        No asistió
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => closeOverdue(apt, "Cancelado")}
+                        className="h-7 text-red-600 hover:bg-red-50 text-xs"
+                      >
+                        Cancelar
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="grid w-full grid-cols-2 bg-orange-50">
           <TabsTrigger value="calendar">Calendario</TabsTrigger>
@@ -762,7 +909,7 @@ export default function AppointmentsModule() {
                             </div>
 
                             {/* ── Botones de Estado ─────────────────────── */}
-                            {apt.status !== "Cancelado" && apt.status !== "Completado" && hasPermission("manage_appointments") && (
+                            {!["Cancelado", "Completado", "No asistió"].includes(apt.status) && hasPermission("manage_appointments") && (
                               <div className="mt-3 pt-3 border-t border-orange-100 flex gap-2 flex-wrap">
                                 <Button
                                   size="sm"
@@ -793,10 +940,16 @@ export default function AppointmentsModule() {
                                 </Button>
                               </div>
                             )}
-                            {(apt.status === "Cancelado" || apt.status === "Completado") && (
+                            {["Cancelado", "Completado", "No asistió"].includes(apt.status) && (
                               <div className="mt-2 pt-2 border-t border-gray-100">
-                                <span className={`text-xs px-2 py-0.5 rounded-full ${apt.status === "Cancelado" ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>
-                                  {apt.status === "Cancelado" ? "Turno cancelado" : "Turno completado"}
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                  apt.status === "Cancelado" ? "bg-red-100 text-red-700"
+                                    : apt.status === "No asistió" ? "bg-amber-100 text-amber-800"
+                                      : "bg-green-100 text-green-700"
+                                }`}>
+                                  {apt.status === "Cancelado" ? "Turno cancelado"
+                                    : apt.status === "No asistió" ? "El cliente no asistió"
+                                      : "Turno completado"}
                                 </span>
                               </div>
                             )}

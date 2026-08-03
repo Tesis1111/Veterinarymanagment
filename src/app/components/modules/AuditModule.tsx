@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAudit } from "../../context/AuditContext";
 import { AuditLog } from "../../types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
@@ -11,12 +11,22 @@ import { Calendar } from "../ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { CalendarIcon, Download, Filter, Search, X } from "lucide-react";
+import { CalendarIcon, ChevronDown, Download, Filter, Loader2, Search, X } from "lucide-react";
 import { Badge } from "../ui/badge";
+import { traerAuditoriaAnteriorA } from "../../services/auditoriaService";
+
+/** Registros que se agregan a la tabla en cada "Ver más". */
+const PAGE_SIZE = 50;
 
 export default function AuditModule() {
   const { logs } = useAudit();
   const [filteredLogs, setFilteredLogs] = useState<AuditLog[]>(logs);
+  // Páginas traídas de Firestore más allá de las que carga AuditContext.
+  const [extraLogs, setExtraLogs] = useState<AuditLog[]>([]);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Se apaga cuando el servidor devuelve una página vacía: no hay más historial.
+  const [serverHasMore, setServerHasMore] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [moduleFilter, setModuleFilter] = useState("all");
   const [actionFilter, setActionFilter] = useState("all");
@@ -26,12 +36,15 @@ export default function AuditModule() {
   const [dateFromOpen, setDateFromOpen] = useState(false);
   const [dateToOpen, setDateToOpen] = useState(false);
 
-  useEffect(() => {
-    setFilteredLogs(logs);
-  }, [logs]);
+  // Historial completo en memoria: lo que trajo el contexto + las páginas
+  // extra, sin duplicados (una recarga del contexto puede solapar ids).
+  const allLogs = useMemo(() => {
+    const seen = new Set(logs.map(l => l.id));
+    return [...logs, ...extraLogs.filter(l => !seen.has(l.id))];
+  }, [logs, extraLogs]);
 
   useEffect(() => {
-    let result = [...logs];
+    let result = [...allLogs];
 
     // Filtro de búsqueda de texto
     if (searchTerm) {
@@ -76,7 +89,47 @@ export default function AuditModule() {
     }
 
     setFilteredLogs(result);
-  }, [searchTerm, moduleFilter, actionFilter, userFilter, dateFrom, dateTo, logs]);
+  }, [searchTerm, moduleFilter, actionFilter, userFilter, dateFrom, dateTo, allLogs]);
+
+  // Al cambiar cualquier filtro se vuelve a la primera página.
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [searchTerm, moduleFilter, actionFilter, userFilter, dateFrom, dateTo]);
+
+  const visibleLogs = filteredLogs.slice(0, visibleCount);
+  // Quedan filas ya cargadas por mostrar, o historial más viejo en el servidor.
+  const canLoadMore = visibleCount < filteredLogs.length || serverHasMore;
+
+  const handleLoadMore = async () => {
+    // Mientras haya filas cargadas sin mostrar, solo se amplía la ventana.
+    if (visibleCount < filteredLogs.length) {
+      setVisibleCount(c => c + PAGE_SIZE);
+      return;
+    }
+    // Agotado lo que hay en memoria: se pide la página siguiente a Firestore,
+    // partiendo del registro más antiguo que ya tenemos.
+    const oldest = allLogs.reduce<Date | null>((min, l) => {
+      const t = new Date(l.timestamp);
+      return !min || t < min ? t : min;
+    }, null);
+    if (!oldest) { setServerHasMore(false); return; }
+
+    setLoadingMore(true);
+    try {
+      const page = await traerAuditoriaAnteriorA(oldest, PAGE_SIZE);
+      if (page.length === 0) {
+        setServerHasMore(false);
+      } else {
+        if (page.length < PAGE_SIZE) setServerHasMore(false);
+        setExtraLogs(prev => [...prev, ...page]);
+        setVisibleCount(c => c + PAGE_SIZE);
+      }
+    } catch {
+      setServerHasMore(false);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const clearFilters = () => {
     setSearchTerm("");
@@ -327,14 +380,14 @@ export default function AuditModule() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredLogs.length === 0 ? (
+                {visibleLogs.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center text-muted-foreground">
                       No hay registros de auditoría que coincidan con los filtros
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredLogs.map((log) => (
+                  visibleLogs.map((log) => (
                     <TableRow key={log.id}>
                       <TableCell className="whitespace-nowrap">
                         {format(new Date(log.timestamp), "dd/MM/yyyy HH:mm:ss")}
@@ -358,6 +411,39 @@ export default function AuditModule() {
               </TableBody>
             </Table>
           </div>
+
+          {visibleLogs.length > 0 && (
+            <div className="mt-4 flex flex-col items-center gap-2">
+              <p className="text-sm text-muted-foreground">
+                Mostrando {visibleLogs.length} de {filteredLogs.length}
+                {serverHasMore && "+"} registro{filteredLogs.length !== 1 ? "s" : ""}
+              </p>
+              {canLoadMore ? (
+                <Button
+                  variant="outline"
+                  onClick={handleLoadMore}
+                  disabled={loadingMore}
+                  className="border-orange-300 text-orange-700 hover:bg-orange-50"
+                >
+                  {loadingMore ? (
+                    <>
+                      <Loader2 className="size-4 mr-2 animate-spin" />
+                      Cargando…
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="size-4 mr-2" />
+                      Ver más
+                    </>
+                  )}
+                </Button>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  No hay más registros
+                </p>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

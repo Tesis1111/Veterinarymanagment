@@ -21,6 +21,7 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Combobox } from "../ui/combobox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
@@ -247,6 +248,20 @@ export default function PetsModuleEnhanced() {
       return true;
     });
   }, [pets, clients, searchTerm, filterSpecies, filterStatus, filterAge]);
+
+  // Clientes activos, ordenados y con DNI/teléfono como texto buscable extra.
+  const clientOptions = useMemo(
+    () =>
+      clients
+        .filter(c => !c.deleted)
+        .sort((a, b) => a.fullName.localeCompare(b.fullName, "es"))
+        .map(c => ({
+          value: c.id,
+          label: c.fullName,
+          description: [c.dniCuit, c.phone].filter(Boolean).join(" · "),
+        })),
+    [clients]
+  );
 
   const availableBreeds = useMemo(() => {
     if (!selectedSpeciesId) return [];
@@ -617,21 +632,15 @@ export default function PetsModuleEnhanced() {
               <Label htmlFor="clientId">
                 Cliente Asociado <span className="text-red-500">*</span>
               </Label>
-              <Select
+              <Combobox
+                id="clientId"
+                options={clientOptions}
                 value={formData.clientId}
-                onValueChange={(value) => setFormData(prev => ({ ...prev, clientId: value }))}
-              >
-                <SelectTrigger id="clientId">
-                  <SelectValue placeholder="Seleccione cliente" />
-                </SelectTrigger>
-                <SelectContent>
-                  {clients.filter(c => !c.deleted).map(client => (
-                    <SelectItem key={client.id} value={client.id}>
-                      {client.fullName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                onChange={(value) => setFormData(prev => ({ ...prev, clientId: value }))}
+                placeholder="Seleccione cliente"
+                searchPlaceholder="Buscar por nombre, DNI/CUIT o teléfono…"
+                emptyMessage="No se encontraron clientes."
+              />
             </div>
 
             <div className="space-y-2">
@@ -1282,23 +1291,14 @@ export default function PetsModuleEnhanced() {
               <Label>
                 Nuevo Dueño <span className="text-red-500">*</span>
               </Label>
-              <Select
+              <Combobox
+                options={clientOptions.filter(o => o.value !== selectedPet?.clientId)}
                 value={changeOwnerForm.newClientId}
-                onValueChange={(value) => setChangeOwnerForm(prev => ({ ...prev, newClientId: value }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Seleccione nuevo dueño" />
-                </SelectTrigger>
-                <SelectContent>
-                  {clients
-                    .filter(c => !c.deleted && c.id !== selectedPet?.clientId)
-                    .map(client => (
-                      <SelectItem key={client.id} value={client.id}>
-                        {client.fullName}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+                onChange={(value) => setChangeOwnerForm(prev => ({ ...prev, newClientId: value }))}
+                placeholder="Seleccione nuevo dueño"
+                searchPlaceholder="Buscar por nombre, DNI/CUIT o teléfono…"
+                emptyMessage="No se encontraron clientes."
+              />
             </div>
 
             <div className="space-y-2">

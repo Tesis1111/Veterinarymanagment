@@ -12,6 +12,7 @@ import {
   where,
   orderBy,
   limit,
+  startAfter,
   serverTimestamp,
   Timestamp,
 } from "firebase/firestore";
@@ -175,6 +176,33 @@ export async function traerAuditoria(maxRecords = 500): Promise<AuditLog[]> {
   }
 
   return lsLoad().slice(0, maxRecords);
+}
+
+/**
+ * Recupera la página siguiente de registros, más antiguos que `before`.
+ *
+ * Se pagina por `timestamp` (el mismo campo del orderBy) en vez de arrastrar un
+ * DocumentSnapshot, para que el llamador no dependa de tipos de Firestore.
+ * Devuelve [] cuando ya no queda nada por traer.
+ */
+export async function traerAuditoriaAnteriorA(
+  before: Date,
+  pageSize = 50
+): Promise<AuditLog[]> {
+  if (FIREBASE_CONFIGURED && db) {
+    const q = query(
+      collection(db, COL),
+      orderBy("timestamp", "desc"),
+      startAfter(Timestamp.fromDate(before)),
+      limit(pageSize)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => toLog(d.id, d.data()));
+  }
+
+  return lsLoad()
+    .filter((l) => new Date(l.timestamp).getTime() < before.getTime())
+    .slice(0, pageSize);
 }
 
 /** Recupera registros filtrados por módulo. */

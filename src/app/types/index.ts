@@ -279,6 +279,10 @@ export type AppointmentStatus =
   | 'Programado'
   | 'Confirmado'
   | 'Completado'
+  // El turno venció sin que el cliente se presentara. Cierra el turno igual que
+  // 'Completado' (libera el slot, no admite edición) pero deja constancia de la
+  // inasistencia en lugar de registrar una atención que no ocurrió.
+  | 'No asistió'
   | 'Cancelado';
 
 export interface Appointment {

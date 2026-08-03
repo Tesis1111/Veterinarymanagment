@@ -24,9 +24,46 @@ export interface ValidationResult {
 export type AppointmentKind = "stay" | "scheduled";
 
 // Estados terminales: el turno ya no admite cambios.
-// (Los turnos se crean como "Confirmado" y pueden reprogramarse; solo
-// "Completado" y "Cancelado" quedan cerrados.)
-const LOCKED_STATUSES: AppointmentStatus[] = ["Completado", "Cancelado"];
+// (Los turnos se crean como "Confirmado" y pueden reprogramarse; el resto
+// quedan cerrados.)
+const LOCKED_STATUSES: AppointmentStatus[] = ["Completado", "No asistió", "Cancelado"];
+
+/** Estados en los que un turno sigue "vivo" y espera resolución. */
+export const OPEN_STATUSES: AppointmentStatus[] = ["Programado", "Confirmado"];
+
+/**
+ * Margen tras la hora del turno antes de considerarlo vencido. Evita que un
+ * turno en curso aparezca como pendiente de cierre apenas pasa su horario.
+ */
+export const OVERDUE_GRACE_HOURS = 2;
+
+/**
+ * ¿El turno pasó de fecha y sigue sin resolverse?
+ *
+ * Los turnos se crean como "Confirmado" y nada los cierra automáticamente: sin
+ * esta detección quedan abiertos para siempre y desaparecen de la vista porque
+ * "Próximos turnos" solo mira fechas futuras.
+ */
+export function isAppointmentOverdue(
+  appointment: Pick<Appointment, "date" | "startTime" | "status" | "dateTo">,
+  now: Date = new Date()
+): boolean {
+  if (!OPEN_STATUSES.includes(appointment.status)) return false;
+
+  // En una estadía el vencimiento lo marca el final del rango, no el inicio.
+  const reference = appointment.dateTo ? new Date(appointment.dateTo) : new Date(appointment.date);
+  if (isNaN(reference.getTime())) return false;
+
+  if (appointment.startTime) {
+    const [h, m] = appointment.startTime.split(":").map(Number);
+    if (!isNaN(h) && !isNaN(m)) reference.setHours(h, m, 0, 0);
+  } else {
+    // Sin hora concreta, vence al terminar el día
+    reference.setHours(23, 59, 59, 999);
+  }
+
+  return now.getTime() - reference.getTime() > OVERDUE_GRACE_HOURS * 60 * 60 * 1000;
+}
 
 /**
  * Valida que una fecha no sea anterior a la fecha actual
@@ -85,6 +122,13 @@ export function canEditAppointment(appointment: Appointment): ValidationResult {
     };
   }
 
+  if (appointment.status === "No asistió") {
+    return {
+      isValid: false,
+      error: "No se puede editar un turno cerrado por inasistencia."
+    };
+  }
+
   if (appointment.status === "Cancelado") {
     return {
       isValid: false,
@@ -103,6 +147,13 @@ export function canDeleteAppointment(appointment: Appointment): ValidationResult
     return {
       isValid: false,
       error: "No se puede eliminar un turno completado."
+    };
+  }
+
+  if (appointment.status === "No asistió") {
+    return {
+      isValid: false,
+      error: "El turno ya está cerrado por inasistencia."
     };
   }
 
@@ -190,6 +241,9 @@ export function isAppointmentLocked(appointment: Appointment): boolean {
 export function getLockedAppointmentMessage(appointment: Appointment): string {
   if (appointment.status === "Completado") {
     return "Turno Completado - Solo Lectura";
+  }
+  if (appointment.status === "No asistió") {
+    return "Turno cerrado por inasistencia - Solo Lectura";
   }
   if (appointment.status === "Cancelado") {
     return "Turno Cancelado - Solo Lectura";
