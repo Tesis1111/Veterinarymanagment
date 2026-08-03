@@ -118,6 +118,22 @@ function isRateLimitedByIp(ip: string): boolean {
 }
 
 
+// ── Recuperación de contraseña: destinatario ───────────────────────────────
+
+/**
+ * Único administrador que recibe los avisos de recuperación de contraseña.
+ *
+ * Se resuelve en el SERVIDOR a propósito. Éste es el único endpoint que se
+ * invoca sin sesión (quien olvidó su contraseña no está autenticado), así que
+ * si el destinatario viniera en el cuerpo del pedido, cualquiera podría usarlo
+ * para mandar correos con la identidad de la veterinaria a quien quisiera.
+ *
+ * Configurable con ADMIN_NOTIFICATION_EMAIL en Vercel por si cambia la persona
+ * a cargo, sin tener que tocar el código.
+ */
+const ADMIN_NOTIFICATION_EMAIL =
+  process.env.ADMIN_NOTIFICATION_EMAIL?.trim() || 'ferreyraemanuel19@gmail.com';
+
 async function verifyIdToken(idToken: string): Promise<string | null> {
   const cached = tokenCache.get(idToken);
   if (cached && cached.expiresAt > Date.now()) return cached.uid;
@@ -218,11 +234,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { to, subject, type, data = {}, attachmentBase64, attachments: rawAttachments } = req.body;
 
-    if (!to || !subject || !type) {
-      return res.status(400).json({ error: 'Faltan campos obligatorios: to, subject, type' });
-    }
-    if (typeof to !== 'string' || !EMAIL_RE.test(to)) {
-      return res.status(400).json({ error: 'Destinatario inválido' });
+    if (!subject || !type) {
+      return res.status(400).json({ error: 'Faltan campos obligatorios: subject, type' });
     }
     if (typeof subject !== 'string' || subject.length > MAX_SUBJECT_LEN) {
       return res.status(400).json({ error: 'Asunto inválido' });
@@ -230,20 +243,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const isAdminRecovery = type === 'admin_password_recovery' || type === 'admin_password_recovery_error';
 
-    if (isAdminRecovery) {
-      // Validar estrictamente el destinatario administrador para evitar abusos
-      const allowedAdmins = ['ferreyraemanuel19@gmail.com', 'admin@veterinaria-leo.com'];
-      if (!allowedAdmins.includes(to)) {
-        return res.status(403).json({ error: 'Destinatario no autorizado para este tipo de correo administrativo' });
-      }
+    // Destinatario final. En la recuperación lo define el servidor; en el
+    // resto, el cliente autenticado.
+    let recipients: string[] = [];
 
-      // Rate limit por IP
+    if (isAdminRecovery) {
       const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
-      const ipStr = Array.isArray(ip) ? ip[0] : String(ip);
-      if (isRateLimitedByIp(ipStr)) {
+      const clientIp = Array.isArray(ip) ? ip[0] : String(ip).split(',')[0].trim();
+      if (isRateLimitedByIp(clientIp)) {
         return res.status(429).json({ error: 'Demasiadas solicitudes de recuperación. Intente en unos minutos.' });
       }
+
+      const recoveryEmail = String(data.recoveryEmail ?? '').trim().toLowerCase();
+      if (!EMAIL_RE.test(recoveryEmail)) {
+        return res.status(400).json({ error: 'Correo de recuperación inválido' });
+      }
+
+      // El campo `to` del cuerpo se ignora deliberadamente: el destinatario lo
+      // fija el servidor, nunca el navegador.
+      recipients = [ADMIN_NOTIFICATION_EMAIL];
+      // La IP real la ve el servidor; la del cliente solo se usa como respaldo.
+      data.ip = clientIp || data.ip;
     } else {
+      if (!to || typeof to !== 'string' || !EMAIL_RE.test(to)) {
+        return res.status(400).json({ error: 'Destinatario inválido' });
+      }
+      recipients = [to];
+
       // Autenticación: solo usuarios logueados en Firebase pueden enviar correos.
       const authHeader = req.headers.authorization || '';
       const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
@@ -426,7 +452,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // no interprete HTML muestra el marcado crudo en lugar del mensaje.
     const emailPayload: any = {
       from: EMAIL_FROM,
-      to,
+      to: recipients,
       subject,
       html: htmlContent,
       text: htmlToText(htmlContent),

@@ -1,11 +1,9 @@
 import { useState } from "react";
 import { sendPasswordResetEmail } from "firebase/auth";
-import { auth, db, FIREBASE_CONFIGURED } from "../firebase/config";
+import { auth, FIREBASE_CONFIGURED } from "../firebase/config";
 import { useAuth } from "../context/AuthContext";
 import { format } from "date-fns";
-import { query, collection, where, getDocs } from "firebase/firestore";
 import { sendAdminPasswordRecoveryNotification } from "../services/resendService";
-import { registrarAuditoria } from "../services/auditoriaService";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -173,38 +171,11 @@ export default function Login() {
       }
     }
 
-    // Limite en Firestore: Máximo 3 solicitudes cada 5 minutos por IP
-    if (db) {
-      try {
-        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-        const qRateLimit = query(
-          collection(db, "auditoria"),
-          where("ipAddress", "==", clientIp),
-          where("action", "==", "Solicitud recuperación de contraseña"),
-          where("timestamp", ">=", fiveMinutesAgo)
-        );
-        const snapRateLimit = await getDocs(qRateLimit);
-        if (snapRateLimit.size >= 3) {
-          // Registrar intento fallido por rate limit en Auditoría
-          await registrarAuditoria({
-            userId: "No autenticado",
-            userName: "No autenticado",
-            userRole: "Invitado",
-            action: "Solicitud recuperación de contraseña",
-            module: "Login",
-            details: `Correo: ${formattedEmail} | IP: ${clientIp} | SO: ${uaInfo.os} | Navegador: ${uaInfo.browser} | Origen: Login | Resultado: Intento bloqueado por límite de velocidad (Rate Limiting)`,
-            ipAddress: clientIp,
-            userAgent: navigator.userAgent
-          });
-
-          setRecoveryError("Límite de solicitudes excedido para su dirección IP. Intente de nuevo en unos minutos.");
-          setRecoverySending(false);
-          return;
-        }
-      } catch (e) {
-        console.error("Error checking rate limit in DB:", e);
-      }
-    }
+    // El límite por IP (5 solicitudes cada 5 minutos) lo aplica el endpoint
+    // /api/send-email, que responde 429. Acá solo queda el freno local de 1
+    // minuto: en esta pantalla no hay sesión, y las reglas de Firestore exigen
+    // rol admin para leer /auditoria, así que consultar el historial desde el
+    // navegador siempre devolvía permission-denied y el límite no se aplicaba.
 
     // Registrar marca de tiempo local para el rate limit
     localStorage.setItem("last_recovery_request", Date.now().toString());
@@ -232,53 +203,25 @@ export default function Login() {
           }
         }
 
-        // Auditoría best-effort: su fallo nunca interrumpe ni altera el
-        // resultado de la recuperación.
-        const logRecoveryAudit = async (resultado: string) => {
-          try {
-            await registrarAuditoria({
-              userId: "No autenticado",
-              userName: "No autenticado",
-              userRole: "Invitado",
-              action: "Solicitud recuperación de contraseña",
-              module: "Login",
-              details: `Correo: ${formattedEmail} | IP: ${clientIp} | SO: ${uaInfo.os} | Navegador: ${uaInfo.browser} | Origen: Login | Resultado: ${resultado}`,
-              ipAddress: clientIp,
-              userAgent: navigator.userAgent
-            });
-          } catch (auditErr) {
-            console.warn("Auditoría de recuperación no registrada (best-effort):", auditErr);
-          }
-        };
-
-        if (recoverySucceeded) {
-          // Notificación de éxito al administrador (Paso 5)
-          sendAdminPasswordRecoveryNotification("ferreyraemanuel19@gmail.com", {
-            recoveryEmail: formattedEmail,
-            date: dateStr,
-            time: timeStr,
-            ip: clientIp,
-            browser: uaInfo.browser,
-            os: uaInfo.os,
-            origin: "Pantalla Login",
-            status: "Solicitud enviada a Firebase correctamente."
-          }).catch(console.error);
-          await logRecoveryAudit("Solicitud enviada correctamente");
-        } else {
-          // Error real e interno (Paso 7)
-          sendAdminPasswordRecoveryNotification("ferreyraemanuel19@gmail.com", {
-            recoveryEmail: formattedEmail,
-            date: dateStr,
-            time: timeStr,
-            ip: clientIp,
-            browser: uaInfo.browser,
-            os: uaInfo.os,
-            origin: "Pantalla Login",
-            status: "Error al enviar correo de recuperación.",
-            errorDetails
-          }).catch(console.error);
-          await logRecoveryAudit(`Error al enviar correo de recuperación. Detalle: ${errorDetails}`);
-        }
+        // Aviso a TODOS los administradores activos. El destinatario ya no se
+        // pasa desde acá: lo resuelve el servidor leyendo /usuarios, que es lo
+        // único que puede hacerlo sin sesión. Ese mismo endpoint registra la
+        // solicitud en /auditoria (desde el navegador la escritura siempre era
+        // rechazada por las reglas, así que ningún intento quedaba registrado).
+        sendAdminPasswordRecoveryNotification({
+          recoveryEmail: formattedEmail,
+          date: dateStr,
+          time: timeStr,
+          ip: clientIp,
+          browser: uaInfo.browser,
+          os: uaInfo.os,
+          origin: "Pantalla Login",
+          ...(recoverySucceeded
+            ? { status: "Solicitud enviada a Firebase correctamente." }
+            : { status: "Error al enviar correo de recuperación.", errorDetails }),
+        }).catch((notifyErr) =>
+          console.error("Aviso de recuperación a administradores no enviado:", notifyErr)
+        );
 
         // Siempre mostrar exactamente el mismo mensaje al usuario (Paso 4)
         setRecoverySuccess(true);

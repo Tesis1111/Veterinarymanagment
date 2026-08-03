@@ -46,7 +46,8 @@ async function sendEmailAndLog(payload: EmailLogData) {
     try {
       if (!db) return;
       await addDoc(collection(db, 'email_logs'), {
-        destinatario: payload.to,
+        // En la recuperación el destinatario lo resuelve el servidor.
+        destinatario: payload.to || (isRecovery ? 'Administradores del sistema' : ''),
         asunto: payload.subject,
         fecha: serverTimestamp(),
         tipo_correo: payload.type,
@@ -220,8 +221,15 @@ export const sendReminder = async (
   });
 };
 
+/**
+ * Avisa a TODOS los administradores activos de una solicitud de recuperación.
+ *
+ * No recibe destinatario: la lista sale de Firestore en el servidor. Este
+ * endpoint es el único que se invoca sin sesión (el usuario olvidó su
+ * contraseña), así que dejar que el navegador eligiera a quién escribir lo
+ * convertiría en un relay abierto con la identidad de la veterinaria.
+ */
 export const sendAdminPasswordRecoveryNotification = async (
-  to: string,
   data: {
     recoveryEmail: string;
     date: string;
@@ -235,12 +243,14 @@ export const sendAdminPasswordRecoveryNotification = async (
   }
 ) => {
   const isError = data.status.toLowerCase().includes("error") || !!data.errorDetails;
-  const subject = isError 
-    ? "Error en recuperación de contraseña ⚠️" 
+  const subject = isError
+    ? "Error en recuperación de contraseña ⚠️"
     : "Solicitud de recuperación de contraseña 🔒";
-  
+
   return sendEmailAndLog({
-    to,
+    // El servidor ignora este campo para los avisos de recuperación y resuelve
+    // los destinatarios por su cuenta; se manda vacío para no sugerir lo contrario.
+    to: "",
     subject,
     type: isError ? "admin_password_recovery_error" : "admin_password_recovery",
     data,
