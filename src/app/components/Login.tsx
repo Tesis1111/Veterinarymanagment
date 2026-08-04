@@ -1,9 +1,6 @@
 import { useState } from "react";
-import { sendPasswordResetEmail } from "firebase/auth";
-import { auth, FIREBASE_CONFIGURED } from "../firebase/config";
+import { FIREBASE_CONFIGURED } from "../firebase/config";
 import { useAuth } from "../context/AuthContext";
-import { format } from "date-fns";
-import { sendAdminPasswordRecoveryNotification } from "../services/resendService";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -29,59 +26,17 @@ import {
   AlertCircle,
   Mail,
   KeyRound,
-  Send,
   CheckCircle,
   AlertTriangle,
 } from "lucide-react";
 
-// Helper to parse User Agent for OS and Browser
-const parseUA = (ua: string) => {
-  let browser = "Desconocido";
-  let os = "Desconocido";
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-  // OS Detection
-  if (/Windows/i.test(ua)) {
-    os = "Windows";
-    if (/Windows NT 10.0/i.test(ua)) os = "Windows 11";
-    else if (/Windows NT 6.3/i.test(ua)) os = "Windows 8.1";
-    else if (/Windows NT 6.2/i.test(ua)) os = "Windows 8";
-    else if (/Windows NT 6.1/i.test(ua)) os = "Windows 7";
-  } else if (/Macintosh|Mac OS/i.test(ua)) {
-    os = "macOS";
-  } else if (/Linux/i.test(ua)) {
-    os = "Linux";
-  } else if (/Android/i.test(ua)) {
-    os = "Android";
-  } else if (/iPhone|iPad|iPod/i.test(ua)) {
-    os = "iOS";
-  }
-
-  // Browser Detection
-  if (/Edg/i.test(ua)) {
-    browser = "Microsoft Edge";
-  } else if (/Chrome/i.test(ua) && !/Chromium/i.test(ua)) {
-    const match = ua.match(/Chrome\/([0-9]+)/);
-    browser = match ? `Google Chrome ${match[1]}` : "Google Chrome";
-  } else if (/Safari/i.test(ua) && !/Chrome/i.test(ua)) {
-    browser = "Safari";
-  } else if (/Firefox/i.test(ua)) {
-    const match = ua.match(/Firefox\/([0-9]+)/);
-    browser = match ? `Firefox ${match[1]}` : "Firefox";
-  }
-
-  return { browser, os };
-};
-
-// Helper to fetch client IP address
-const getClientIp = async (): Promise<string> => {
-  try {
-    const res = await fetch("https://api.ipify.org?format=json");
-    const data = await res.json();
-    return data.ip || "127.0.0.1";
-  } catch (error) {
-    return "127.0.0.1";
-  }
-};
+// El navegador ya no interpreta el User-Agent ni consulta la IP a un tercero:
+// ambos datos los toma el servidor de la propia petición HTTP, que es la fuente
+// fiable (el cliente puede falsear lo que manda en el cuerpo). La consulta a
+// api.ipify.org además nunca funcionó en producción: ese dominio no está en la
+// directiva `connect-src` de la Content-Security-Policy del sitio.
 
 export default function Login() {
   const { login } = useAuth();
@@ -129,114 +84,63 @@ export default function Login() {
   };
 
   // ── Password recovery ─────────────────────────────────────────
+  //
+  // El cliente solo valida el formato y manda el correo. Todo lo demás —cupo de
+  // solicitudes, existencia de la cuenta, generación del enlace, envío,
+  // auditoría y aviso a los administradores— ocurre en /api/password-recovery.
+  //
+  // Concentrarlo en el servidor no es una cuestión de prolijidad: sin sesión de
+  // Firebase, las reglas de Firestore rechazan toda escritura, así que desde
+  // acá era imposible dejar rastro de la solicitud. Un freno en localStorage
+  // tampoco es un control de seguridad (una ventana de incógnito lo saltea).
   const handleRecover = async () => {
     setRecoveryError("");
 
-    // 1. Validaciones de entrada (Paso 2)
     const formattedEmail = recoveryEmail.trim().toLowerCase();
     if (!formattedEmail) {
       setRecoveryError("El correo electrónico es obligatorio.");
       return;
     }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(formattedEmail)) {
+    if (!EMAIL_RE.test(formattedEmail)) {
       setRecoveryError("El formato de correo no es válido.");
       return;
     }
 
-    if (!FIREBASE_CONFIGURED || !auth) {
-      setRecoveryError(
-        "La recuperación de contraseña requiere Firebase configurado."
-      );
-      return;
-    }
-
     setRecoverySending(true);
+    try {
+      const response = await fetch("/api/password-recovery", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: formattedEmail }),
+      });
 
-    // Obtener IP e información del dispositivo
-    const clientIp = await getClientIp();
-    const uaInfo = parseUA(navigator.userAgent);
-    const dateStr = format(new Date(), "dd/MM/yyyy");
-    const timeStr = format(new Date(), "HH:mm");
-
-    // 2. Rate Limiting (Limitación de solicitudes por IP/local)
-    // Limite local: 1 minuto entre solicitudes
-    const lastRequest = localStorage.getItem("last_recovery_request");
-    if (lastRequest) {
-      const diff = Date.now() - parseInt(lastRequest, 10);
-      if (diff < 60000) {
-        setRecoveryError("Ha enviado una solicitud recientemente. Por favor, intente de nuevo en un minuto.");
-        setRecoverySending(false);
+      // Solo se distinguen los errores de configuración/formato del servidor.
+      // Cualquier otro resultado —cuenta inexistente, cuenta dada de baja, cupo
+      // agotado— devuelve 200 con el mismo cuerpo, justamente para que esta
+      // pantalla no sirva para averiguar qué correos están dados de alta.
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        setRecoveryError(
+          body?.error || "No se pudo procesar la solicitud. Intente nuevamente más tarde."
+        );
         return;
       }
-    }
 
-    // El límite por IP (5 solicitudes cada 5 minutos) lo aplica el endpoint
-    // /api/send-email, que responde 429. Acá solo queda el freno local de 1
-    // minuto: en esta pantalla no hay sesión, y las reglas de Firestore exigen
-    // rol admin para leer /auditoria, así que consultar el historial desde el
-    // navegador siempre devolvía permission-denied y el límite no se aplicaba.
-
-    // Registrar marca de tiempo local para el rate limit
-    localStorage.setItem("last_recovery_request", Date.now().toString());
-
-    try {
-      if (FIREBASE_CONFIGURED && auth) {
-        // El ÚNICO fallo que cuenta como "error de recuperación" es el de
-        // Firebase Auth. La auditoría en Firestore es best-effort: un usuario
-        // NO autenticado no tiene permiso de escritura en /auditoria, y ese
-        // `permission-denied` NO debe reportarse como si el correo de reseteo
-        // hubiese fallado (antes contaminaba el resultado y generaba un email
-        // de error falso, aunque el reseteo sí se enviaba correctamente).
-        let recoverySucceeded = true;
-        let errorDetails = "";
-        try {
-          // Enviar el correo oficial de Firebase (Paso 3)
-          await sendPasswordResetEmail(auth, formattedEmail);
-        } catch (fbErr: any) {
-          console.error("Firebase Auth Error:", fbErr);
-          // 'auth/user-not-found' se trata igual que un éxito de cara al
-          // usuario (no revelar si la cuenta existe).
-          if (fbErr.code !== "auth/user-not-found") {
-            recoverySucceeded = false;
-            errorDetails = `Firebase returned ${fbErr.code || "INTERNAL_ERROR"}: ${fbErr.message || "Error desconocido"}`;
-          }
-        }
-
-        // Aviso a TODOS los administradores activos. El destinatario ya no se
-        // pasa desde acá: lo resuelve el servidor leyendo /usuarios, que es lo
-        // único que puede hacerlo sin sesión. Ese mismo endpoint registra la
-        // solicitud en /auditoria (desde el navegador la escritura siempre era
-        // rechazada por las reglas, así que ningún intento quedaba registrado).
-        sendAdminPasswordRecoveryNotification({
-          recoveryEmail: formattedEmail,
-          date: dateStr,
-          time: timeStr,
-          ip: clientIp,
-          browser: uaInfo.browser,
-          os: uaInfo.os,
-          origin: "Pantalla Login",
-          ...(recoverySucceeded
-            ? { status: "Solicitud enviada a Firebase correctamente." }
-            : { status: "Error al enviar correo de recuperación.", errorDetails }),
-        }).catch((notifyErr) =>
-          console.error("Aviso de recuperación a administradores no enviado:", notifyErr)
-        );
-
-        // Siempre mostrar exactamente el mismo mensaje al usuario (Paso 4)
-        setRecoverySuccess(true);
-        toast.success("Solicitud procesada", {
-          description: "Si existe una cuenta asociada a este correo electrónico, recibirás un enlace para restablecer tu contraseña."
-        });
-      }
+      setRecoverySuccess(true);
+      toast.success("Solicitud procesada", {
+        description:
+          "Si existe una cuenta asociada a este correo electrónico, recibirás un enlace para restablecer tu contraseña.",
+      });
 
       setTimeout(() => {
         setShowRecover(false);
         setRecoveryEmail("");
         setRecoverySuccess(false);
       }, 5000);
-    } catch (err: any) {
-      setRecoveryError("Ocurrió un error inesperado al procesar la solicitud.");
+    } catch {
+      setRecoveryError(
+        "No se pudo contactar con el servidor. Verifique su conexión e intente nuevamente."
+      );
     } finally {
       setRecoverySending(false);
     }
@@ -245,6 +149,10 @@ export default function Login() {
   // ── Render ────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-orange-50 flex items-center justify-center p-4">
+      {/* `Toaster` estaba importado pero nunca se renderizaba, así que ningún
+          toast.* de esta pantalla llegaba a mostrarse. */}
+      <Toaster position="top-center" richColors />
+
       <div className="w-full max-w-md">
 
         {/* Logo */}
