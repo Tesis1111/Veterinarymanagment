@@ -340,7 +340,15 @@ export type AuditAction =
   | 'VIEW'
   | 'EXPORT'
   | 'PRINT'
-  | 'CONFIG_CHANGE';
+  | 'CONFIG_CHANGE'
+  // ── Recuperación de contraseña ──────────────────────────────────────────
+  // Las escribe /api/password-recovery con el Admin SDK. No pueden generarse
+  // desde el navegador: quien recupera su contraseña no tiene sesión, y las
+  // reglas de Firestore exigen `userId == request.auth.uid` para escribir en
+  // /auditoria. Por eso, hasta que el flujo pasó al servidor, la recuperación
+  // era la única operación del sistema que no dejaba rastro.
+  | 'PASSWORD_RESET_REQUEST'   // se procesó una solicitud (haya o no cuenta)
+  | 'PASSWORD_RESET_BLOCKED';  // se rechazó por superar el cupo de solicitudes
 
 export type AuditModule =
   | 'clients'

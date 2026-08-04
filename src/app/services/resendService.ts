@@ -26,19 +26,15 @@ async function sendEmailAndLog(payload: EmailLogData) {
     return { success: true, id: null, skipped: 'dev' };
   }
 
-  const isRecovery = payload.type === 'admin_password_recovery' || payload.type === 'admin_password_recovery_error';
-  let idToken = '';
-  let userId = 'No autenticado';
-
-  if (!isRecovery) {
-    // El endpoint exige sesión de Firebase (Authorization: Bearer <idToken>).
-    const currentUser = auth?.currentUser;
-    if (!currentUser) {
-      throw new Error('Se requiere una sesión activa para enviar correos.');
-    }
-    idToken = await currentUser.getIdToken();
-    userId = currentUser.uid;
+  // Todos los correos de este servicio exigen sesión: el endpoint valida el
+  // idToken. El único flujo sin sesión (recuperación de contraseña) tiene su
+  // propio endpoint, /api/password-recovery, que audita del lado del servidor.
+  const currentUser = auth?.currentUser;
+  if (!currentUser) {
+    throw new Error('Se requiere una sesión activa para enviar correos.');
   }
+  const idToken = await currentUser.getIdToken();
+  const userId = currentUser.uid;
 
   // El log en Firestore es "best effort": si falla, NO debe hacer fallar un
   // correo que sí se envió. Las reglas exigen userId == uid del autenticado.
@@ -46,8 +42,7 @@ async function sendEmailAndLog(payload: EmailLogData) {
     try {
       if (!db) return;
       await addDoc(collection(db, 'email_logs'), {
-        // En la recuperación el destinatario lo resuelve el servidor.
-        destinatario: payload.to || (isRecovery ? 'Administradores del sistema' : ''),
+        destinatario: payload.to,
         asunto: payload.subject,
         fecha: serverTimestamp(),
         tipo_correo: payload.type,
@@ -63,16 +58,12 @@ async function sendEmailAndLog(payload: EmailLogData) {
 
   try {
     // 1. Llamar a nuestra Serverless Function
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    if (idToken) {
-      headers['Authorization'] = `Bearer ${idToken}`;
-    }
-
     const response = await fetch('/api/send-email', {
       method: 'POST',
-      headers,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
       body: JSON.stringify(payload),
     });
 
@@ -221,38 +212,8 @@ export const sendReminder = async (
   });
 };
 
-/**
- * Avisa a TODOS los administradores activos de una solicitud de recuperación.
- *
- * No recibe destinatario: la lista sale de Firestore en el servidor. Este
- * endpoint es el único que se invoca sin sesión (el usuario olvidó su
- * contraseña), así que dejar que el navegador eligiera a quién escribir lo
- * convertiría en un relay abierto con la identidad de la veterinaria.
- */
-export const sendAdminPasswordRecoveryNotification = async (
-  data: {
-    recoveryEmail: string;
-    date: string;
-    time: string;
-    ip: string;
-    browser: string;
-    os: string;
-    origin: string;
-    status: string;
-    errorDetails?: string;
-  }
-) => {
-  const isError = data.status.toLowerCase().includes("error") || !!data.errorDetails;
-  const subject = isError
-    ? "Error en recuperación de contraseña ⚠️"
-    : "Solicitud de recuperación de contraseña 🔒";
-
-  return sendEmailAndLog({
-    // El servidor ignora este campo para los avisos de recuperación y resuelve
-    // los destinatarios por su cuenta; se manda vacío para no sugerir lo contrario.
-    to: "",
-    subject,
-    type: isError ? "admin_password_recovery_error" : "admin_password_recovery",
-    data,
-  });
-};
+// El aviso de recuperación de contraseña a los administradores ya no se dispara
+// desde el navegador. Lo emite /api/password-recovery, que resuelve los
+// destinatarios consultando de verdad los administradores activos en /usuarios
+// y deja registro en /auditoria — algo imposible desde acá, porque sin sesión
+// las reglas de Firestore rechazan cualquier escritura.

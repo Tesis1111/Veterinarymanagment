@@ -206,6 +206,18 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ── /rate_limits ──────────────────────────────────────
+    // Contadores de la limitación de solicitudes de recuperación de contraseña
+    // (api/_lib/rate-limit.ts). CERRADA a todo cliente: solo la escribe el
+    // Admin SDK desde la función serverless, que no pasa por estas reglas.
+    //
+    // Si el navegador pudiera escribir acá, podría reiniciar su propio contador
+    // y el límite no serviría de nada. La regla explícita documenta esa
+    // intención (el catch-all de abajo ya lo negaría igual).
+    match /rate_limits/{docId} {
+      allow read, write: if false;
+    }
+
     // ── Deny everything else ──────────────────────────────
     match /{document=**} {
       allow read, write: if false;
