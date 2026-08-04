@@ -7,7 +7,12 @@
  */
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { Resend } from 'resend';
-import { baseTemplate, infoBox, infoRow, p, h2, htmlToText, esc } from './_lib/email-template';
+// La extensión .js es obligatoria: el package.json declara "type": "module",
+// así que estas funciones corren como ESM en Node, y ESM no resuelve imports
+// relativos sin extensión. Se escribe .js aunque el archivo sea .ts porque el
+// especificador debe apuntar al archivo YA COMPILADO — TypeScript lo entiende
+// y lo deja tal cual al emitir.
+import { baseTemplate, infoBox, infoRow, p, h2, htmlToText, esc } from './_lib/email-template.js';
 
 // Vercel environment variables
 const RESEND_API_KEY = process.env.RESEND_API_KEY;

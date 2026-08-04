@@ -34,11 +34,16 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Resend } from 'resend';
 import { FieldValue } from 'firebase-admin/firestore';
-import { adminAuth, adminDb, ADMIN_CONFIGURED } from './_lib/firebase-admin';
-import { consumeRateLimit } from './_lib/rate-limit';
+// La extensión .js es obligatoria: el package.json declara "type": "module",
+// así que estas funciones corren como ESM en Node, y ESM no resuelve imports
+// relativos sin extensión. Se escribe .js aunque el archivo sea .ts porque el
+// especificador debe apuntar al archivo YA COMPILADO — TypeScript lo entiende
+// y lo deja tal cual al emitir.
+import { adminAuth, adminDb, ADMIN_CONFIGURED } from './_lib/firebase-admin.js';
+import { consumeRateLimit } from './_lib/rate-limit.js';
 import {
   baseTemplate, infoBox, infoRow, p, h2, small, cta, htmlToText, esc,
-} from './_lib/email-template';
+} from './_lib/email-template.js';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM || 'Veterinaria Leo <notificaciones@notificationvet.com>';
