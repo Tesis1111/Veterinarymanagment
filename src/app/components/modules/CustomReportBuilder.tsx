@@ -5,7 +5,7 @@ import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { Checkbox } from "../ui/checkbox";
-import { Download, FileSpreadsheet, Settings } from "lucide-react";
+import { FileSpreadsheet, Settings } from "lucide-react";
 import { format } from "date-fns";
 import { exportToExcel } from "../../utils/exportUtils";
 import { toast } from "sonner";
@@ -14,7 +14,6 @@ interface CustomReportBuilderProps {
   clients: any[];
   pets: any[];
   medicalRecords: any[];
-  appointments: any[];
 }
 
 const AVAILABLE_COLUMNS = [
@@ -31,7 +30,7 @@ const AVAILABLE_COLUMNS = [
   { id: "record_desc", label: "Historial - Descripción", entity: "record" },
 ];
 
-export default function CustomReportBuilder({ clients, pets, medicalRecords, appointments }: CustomReportBuilderProps) {
+export default function CustomReportBuilder({ clients, pets, medicalRecords }: CustomReportBuilderProps) {
   const [selectedColumns, setSelectedColumns] = useState<string[]>(["client_name", "pet_name", "pet_species"]);
   const [baseEntity, setBaseEntity] = useState<"pets" | "records">("pets");
 

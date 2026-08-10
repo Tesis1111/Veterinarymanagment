@@ -3,11 +3,8 @@ import { useAuth } from "../../context/AuthContext";
 import { useAudit } from "../../context/AuditContext";
 import { MedicalRecord, Client, Pet, MedicalAttachment } from "../../types";
 import {
-  traerHistorial,
   traerTodosLosHistoriales,
   registrarHistorial,
-  eliminarHistorial,
-  validarTamañoFormato,
 } from "../../services/historialService";
 import { traerClientes } from "../../services/clienteService";
 import { traerMascotas } from "../../services/mascotaService";
@@ -16,7 +13,7 @@ import { EspecieParametro, RazaParametro } from "../../types";
 import { traerDoctores } from "../../services/doctorService";
 import { TipoEvento, VacunaParametro, DoctorPerfil } from "../../types";
 import { db, FIREBASE_CONFIGURED } from "../../firebase/config";
-import { collection, addDoc, onSnapshot, serverTimestamp, Timestamp, query, where, orderBy } from "firebase/firestore";
+import { collection, addDoc, onSnapshot, serverTimestamp, Timestamp, query, where } from "firebase/firestore";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
@@ -30,8 +27,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Badge } from "../ui/badge";
 import {
-  FileText, Activity, AlertTriangle, Calendar as CalendarIcon, Clock,
-  Save, Trash2, X, Plus, Search, ChevronRight, Stethoscope, FileSpreadsheet, RefreshCw,
+  FileText, AlertTriangle, Calendar as CalendarIcon,
+  X, Plus, Stethoscope, FileSpreadsheet,
   File, Image as ImageIcon, FileType, Thermometer, Scale,
   Pill, ClipboardList, AlertCircle, Mail, CheckSquare, Square, Send,
   Archive, Syringe, Eye, Upload, Download
@@ -40,7 +37,6 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { exportToExcel, exportToPDF } from "../../utils/exportUtils";
-import { useSuccessPopup } from "../../context/SuccessPopupContext";
 import { sendClinicalRecordEmail, sendReminder } from "../../services/resendService";
 
 // Static fallback event types (used when Firebase is not configured)
@@ -62,7 +58,6 @@ const CLINICAL_EVENT_TYPES_FALLBACK = [
 export default function MedicalHistoryModule() {
   const { user, hasPermission } = useAuth();
   const { addLog } = useAudit();
-  const { showSuccess } = useSuccessPopup();
   const [records, setRecords] = useState<MedicalRecord[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [pets, setPets] = useState<Pet[]>([]);
@@ -186,8 +181,6 @@ export default function MedicalHistoryModule() {
     (clients.find(c => c.id === clientId) as any)?.email || "";
   const getPetName = (petId: string) =>
     pets.find(p => p.id === petId)?.name || "";
-  const getPetSpecies = (petId: string) =>
-    (pets.find(p => p.id === petId) as any)?.species || "";
   const getDoctorName = (doctorId: string) =>
     doctoresPerfil.find(d => d.id === doctorId)?.fullName || "Desconocido";
   const getDoctorSpecialty = (doctorId: string) =>
@@ -525,35 +518,6 @@ export default function MedicalHistoryModule() {
     }
   };
 
-  // ── Exportar CSV ──────────────────────────────────────
-  const handleExport = () => {
-    if (petHistory.length === 0) { toast.error("No hay historial para exportar"); return; }
-    const csv = [
-      ["Fecha", "Tipo de Evento", "Profesional", "Peso (kg)", "Temp (°C)", "Descripción", "Diagnóstico", "Tratamiento", "Medicación"],
-      ...petHistory.map(r => [
-        format(new Date(r.date), "dd/MM/yyyy"),
-        r.eventType,
-        getDoctorName(r.professionalId),
-        (r as any).weight || "",
-        (r as any).temperature || "",
-        r.description.replace(/\n/g, " "),
-        (r as any).diagnosis || "",
-        (r as any).treatment || "",
-        (r as any).medication || "",
-      ])
-    ].map(row => row.map(c => `"${c}"`).join(",")).join("\n");
-
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `historial_${getPetName(selectedPetId)}_${format(new Date(), "ddMMyyyy")}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    addLog("Exportar", "Historial Clínico", `Historial de ${getPetName(selectedPetId)} exportado`);
-    toast.success("Historial exportado");
-  };
-
   const handleExportExcel = () => {
     if (petHistory.length === 0) { toast.error("No hay historial para exportar"); return; }
     exportToExcel(
@@ -626,7 +590,6 @@ export default function MedicalHistoryModule() {
   };
 
   const selectedPetInfo = pets.find(p => p.id === selectedPetId);
-  const selectedClientInfo = clients.find(c => c.id === selectedClientId);
   const clientEmail = getClientEmail(selectedClientId);
   const isPetDeceased = selectedPetInfo?.deceased || false;
 

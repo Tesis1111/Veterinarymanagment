@@ -33,7 +33,7 @@ import {
   signOut as fbSignOut,
 } from "firebase/auth";
 import { initializeApp, deleteApp } from "firebase/app";
-import { auth, db, app, FIREBASE_CONFIGURED } from "../firebase/config";
+import { db, app, FIREBASE_CONFIGURED } from "../firebase/config";
 import { User, UserFormData, PermissionName, FormValidationResult } from "../types";
 import { sincronizarDoctorDeUsuario } from "./doctorService";
 import { audit } from "./auditoriaService";

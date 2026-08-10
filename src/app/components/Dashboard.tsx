@@ -7,14 +7,12 @@ import {
   CardTitle,
 } from "./ui/card";
 import { Button } from "./ui/button";
-import { Badge } from "./ui/badge";
 import {
   Users,
   PawPrint,
   FileText,
   Calendar,
   TrendingUp,
-  Clock,
   Settings,
   Shield,
   Stethoscope,
@@ -412,7 +410,7 @@ export default function Dashboard({
                               {apt.startTime || "Todo el día"}
                             </p>
                             {(() => {
-                              const dynamicType = tiposServicio.find(t => t.id === apt.type || t.name.toLowerCase() === apt.type.toLowerCase());
+                              const dynamicType = tiposServicio.find(t => t.id === apt.type || t.name.toLowerCase() === (apt.type ?? "").toLowerCase());
                               const colorClass = dynamicType?.color || (apt.type === "clinic" ? "bg-blue-100 text-blue-800" : apt.type === "grooming" ? "bg-pink-100 text-pink-800" : apt.type === "daycare" ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800");
                               const label = dynamicType?.name || (apt.type === "clinic" ? "Clínica" : apt.type === "grooming" ? "Peluquería" : apt.type === "daycare" ? "Guardería" : apt.type);
                               return (

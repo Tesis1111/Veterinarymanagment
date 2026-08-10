@@ -521,10 +521,6 @@ export default function PetsModuleEnhanced() {
             variant="outline"
             className="border-green-300 text-green-700 hover:bg-green-50"
             onClick={() => {
-              const clientName = (petId: string) => {
-                const pet = filteredPets.find(p => p.id === petId);
-                return clients.find(c => c.id === pet?.clientId)?.fullName || "—";
-              };
               exportToExcel(
                 "mascotas",
                 ["Nombre", "Especie", "Raza", "Sexo", "Dueño", "Fecha Nac.", "Tamaño", "Estado"],
@@ -973,7 +969,9 @@ export default function PetsModuleEnhanced() {
                           <TableCell className="font-medium">
                             {pet.name}
                             {pet.deceased && (
-                              <Archive className="inline h-4 w-4 ml-1.5 text-gray-500" title="Dar de baja" />
+                              <span title="Dar de baja">
+                                <Archive className="inline h-4 w-4 ml-1.5 text-gray-500" />
+                              </span>
                             )}
                           </TableCell>
                           <TableCell>
@@ -989,14 +987,15 @@ export default function PetsModuleEnhanced() {
                           <TableCell className="hidden md:table-cell">
                             {getClientName(pet.clientId)}
                             {pet.ownershipHistory && pet.ownershipHistory.length > 0 && (
-                              <History
-                                className="inline h-3.5 w-3.5 ml-1.5 text-blue-500 cursor-pointer"
+                              <span
                                 title="Tiene historial de cambios de dueño"
                                 onClick={() => {
                                   setSelectedPet(pet);
                                   setHistoryDialogOpen(true);
                                 }}
-                              />
+                              >
+                                <History className="inline h-3.5 w-3.5 ml-1.5 text-blue-500 cursor-pointer" />
+                              </span>
                             )}
                           </TableCell>
                           <TableCell className="hidden lg:table-cell">

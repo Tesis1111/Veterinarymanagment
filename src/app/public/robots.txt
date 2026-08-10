@@ -1,4 +1,4 @@
-# VetCare - Sistema de Gestión Veterinaria
+# Veterinaria Leo - Sistema de Gestión
 # Este es un sistema privado de gestión, no debe ser indexado por motores de búsqueda
 
 User-agent: *

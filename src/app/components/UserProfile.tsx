@@ -9,8 +9,6 @@ import { Badge } from "./ui/badge";
 import { User, Mail, Shield, CheckCircle, XCircle, Edit, Save, X, Phone } from "lucide-react";
 import { toast } from "sonner";
 
-type ActiveModule = "dashboard" | "clients" | "pets" | "medical" | "appointments" | "users" | "profile";
-
 const permissionLabels: Record<string, string> = {
   "manage_clients": "Gestionar Clientes",
   "manage_pets": "Gestionar Mascotas",
@@ -22,11 +20,7 @@ const permissionLabels: Record<string, string> = {
   "manage_permissions": "Gestionar Permisos"
 };
 
-interface UserProfileProps {
-  setActiveModule: (module: ActiveModule) => void;
-}
-
-export default function UserProfile({ setActiveModule }: UserProfileProps) {
+export default function UserProfile() {
   const { user, isAdmin, updateUser } = useAuth();
   const { addLog } = useAudit();
   const [isEditing, setIsEditing] = useState(false);

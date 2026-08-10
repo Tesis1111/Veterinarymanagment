@@ -49,7 +49,7 @@ export default function AuditModule() {
     // Filtro de búsqueda de texto
     if (searchTerm) {
       result = result.filter(log => 
-        log.details.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (log.details ?? "").toLowerCase().includes(searchTerm.toLowerCase()) ||
         log.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         log.action.toLowerCase().includes(searchTerm.toLowerCase())
       );

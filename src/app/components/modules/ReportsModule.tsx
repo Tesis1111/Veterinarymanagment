@@ -8,14 +8,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Badge } from "../ui/badge";
 import {
-  BarChart, Bar, PieChart, Pie, Cell, LineChart, Line,
+  BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area
 } from "recharts";
 import { Calendar } from "../ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import {
   BarChart3, PieChart as PieChartIcon, TrendingUp, Users, PawPrint,
-  Activity, Calendar as CalendarIcon, Download, FileText, FileSpreadsheet,
+  Activity, Calendar as CalendarIcon, FileText, FileSpreadsheet,
   Stethoscope, Award, ArrowUpRight, ArrowDownRight
 } from "lucide-react";
 import { format, startOfMonth, endOfMonth, subMonths, isWithinInterval } from "date-fns";
@@ -878,7 +878,7 @@ export default function ReportsModule({ externalClients, externalPets }: Reports
                   <ResponsiveContainer width="100%" height={300}>
                     <PieChart>
                       <Pie data={recordsByEventType} cx="50%" cy="50%" outerRadius={110}
-                        label={({ name, percentage }) => `${percentage}%`}
+                        label={({ percentage }) => `${percentage}%`}
                         labelLine dataKey="value">
                         {recordsByEventType.map((_, index) => (
                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -964,7 +964,7 @@ export default function ReportsModule({ externalClients, externalPets }: Reports
                   <ResponsiveContainer width="100%" height={300}>
                     <PieChart>
                       <Pie data={recordsByServiceType} cx="50%" cy="50%" outerRadius={110}
-                        label={({ name, percentage }) => `${percentage}%`}
+                        label={({ percentage }) => `${percentage}%`}
                         labelLine dataKey="value">
                         {recordsByServiceType.map((_, index) => (
                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -1063,7 +1063,6 @@ export default function ReportsModule({ externalClients, externalPets }: Reports
             clients={scopedClients}
             pets={scopedPets}
             medicalRecords={medicalRecords}
-            appointments={appointments}
           />
         </TabsContent>
       </Tabs>

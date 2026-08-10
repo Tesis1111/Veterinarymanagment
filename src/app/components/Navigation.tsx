@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { Dog, Users, PawPrint, FileText, Calendar, Shield, Menu, X, User, LogOut, Settings, UserCog, Phone, Clock, ClipboardList, Mail, LayoutDashboard, BarChart3, Settings2 } from "lucide-react";
+import { Dog, Users, PawPrint, FileText, Calendar, Shield, Menu, User, LogOut, Settings, Phone, Clock, ClipboardList, Mail, LayoutDashboard, Settings2 } from "lucide-react";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle, SheetDescription } from "./ui/sheet";

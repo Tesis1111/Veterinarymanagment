@@ -208,7 +208,7 @@ export default function ClientsModule() {
       fullName: client.fullName,
       dniCuit: client.dniCuit,
       phone: client.phone,
-      address: client.address,
+      address: client.address || "",
       email: client.email || "",
       observations: client.observations || ""
     });

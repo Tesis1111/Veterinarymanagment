@@ -1,30 +1,11 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig } from 'vite'
 import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 
-
-function figmaAssetResolver() {
-  return {
-    name: 'figma-asset-resolver',
-    resolveId(id) {
-      if (id.startsWith('figma:asset/')) {
-        const filename = id.replace('figma:asset/', '')
-        return path.resolve(__dirname, 'src/assets', filename)
-      }
-    },
-  }
-}
-
 export default defineConfig(({ mode }) => {
-  // Load .env files so we can reference them in config (e.g. for base URL)
-  const env = loadEnv(mode, process.cwd(), '')
-
   return {
     plugins: [
-    figmaAssetResolver(),
-      // The React and Tailwind plugins are both required for Make, even if
-      // Tailwind is not being actively used – do not remove them
       react(),
       tailwindcss(),
     ],
@@ -52,8 +33,10 @@ export default defineConfig(({ mode }) => {
         output: {
           // Manual chunking: split vendor libs so the main bundle stays small
           manualChunks: {
-            // React core
-            'react-vendor': ['react', 'react-dom'],
+            // React core. Hay que nombrar también 'react/jsx-runtime' y
+            // 'react-dom/client': son los módulos que el código importa de
+            // verdad, y sin ellos el chunk sale vacío.
+            'react-vendor': ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client'],
             // Firebase SDK — split per service to allow tree-shaking
             'firebase-app':       ['firebase/app'],
             'firebase-auth':      ['firebase/auth'],
@@ -62,7 +45,6 @@ export default defineConfig(({ mode }) => {
             // UI component library
             'radix-ui': [
               '@radix-ui/react-dialog',
-              '@radix-ui/react-dropdown-menu',
               '@radix-ui/react-select',
               '@radix-ui/react-tabs',
               '@radix-ui/react-tooltip',

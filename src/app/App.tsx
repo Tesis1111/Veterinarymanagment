@@ -93,7 +93,7 @@ function AppContent() {
         {activeModule === "medical" && <ErrorBoundary><MedicalHistoryModule /></ErrorBoundary>}
         {activeModule === "appointments" && <ErrorBoundary><AppointmentsModule /></ErrorBoundary>}
         {activeModule === "profile" && (
-          <ErrorBoundary><UserProfile setActiveModule={setActiveModule} /></ErrorBoundary>
+          <ErrorBoundary><UserProfile /></ErrorBoundary>
         )}
 
         {/* ── Admin-only modules — boundary DENTRO del guard, para que un

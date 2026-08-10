@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { useAudit } from "../../context/AuditContext";
-import { Appointment, Client, Pet, AppointmentStatus, Doctor, DoctorSchedule, TipoEvento, DoctorPerfil, TipoServicioParametro } from "../../types";
+import { Appointment, Client, Pet, AppointmentStatus, DoctorSchedule, TipoEvento, DoctorPerfil, TipoServicioParametro } from "../../types";
 import {
   registrarTurno,
   modificarTurno,
@@ -30,9 +30,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Badge } from "../ui/badge";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
-import { Calendar as CalendarIcon, Clock, PawPrint, X, Save, AlertTriangle, CheckCircle2, FileSpreadsheet, FileText, XCircle, CheckCircle } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, X, Save, AlertTriangle, CheckCircle2, FileSpreadsheet, FileText, XCircle, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
-import { format, isSameDay, isBefore, differenceInHours, startOfDay, addDays } from "date-fns";
+import { format, isSameDay, isBefore, startOfDay } from "date-fns";
 import { es } from "date-fns/locale";
 import {
   validateAppointmentDate,
@@ -53,7 +53,6 @@ export default function AppointmentsModule() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [pets, setPets] = useState<Pet[]>([]);
-  const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [doctorSchedules, setDoctorSchedules] = useState<DoctorSchedule[]>([]);
   const [tiposEvento, setTiposEvento] = useState<TipoEvento[]>([]);
   const [tiposServicio, setTiposServicio] = useState<TipoServicioParametro[]>([]);
@@ -190,9 +189,7 @@ export default function AppointmentsModule() {
   const getPetName = (petId: string) => pets.find(p => p.id === petId)?.name || "";
   const getDoctorName = (doctorId?: string) => {
     if (!doctorId) return "-";
-    const fromPerfil = doctoresPerfil.find(d => d.id === doctorId);
-    if (fromPerfil) return fromPerfil.fullName;
-    return (doctors.find(d => d.id === doctorId) as any)?.name || "Desconocido";
+    return doctoresPerfil.find(d => d.id === doctorId)?.fullName || "Desconocido";
   };
   const getPetsByClient = (clientId: string) =>
     pets.filter(p => (p.clientId === clientId) || ((p as any).ownerId === clientId));
@@ -210,12 +207,14 @@ export default function AppointmentsModule() {
 
   const getStatusLabel = (status: AppointmentStatus): string => status;
 
-  const getTypeLabel = (type: string) => {
+  const getTypeLabel = (type?: string) => {
+    if (!type) return "-";
     const dynamicType = tiposServicio.find(t => t.id === type || t.name.toLowerCase() === type.toLowerCase());
     return dynamicType ? dynamicType.name : type;
   };
 
-  const getTypeColor = (type: string) => {
+  const getTypeColor = (type?: string) => {
+    if (!type) return "bg-gray-100 text-gray-800";
     const dynamicType = tiposServicio.find(t => t.id === type || t.name.toLowerCase() === type.toLowerCase());
     return dynamicType?.color || "bg-gray-100 text-gray-800";
   };
@@ -349,17 +348,6 @@ export default function AppointmentsModule() {
     if (ok < pending.length) {
       toast.error(`No se pudieron cerrar ${pending.length - ok} turnos.`);
     }
-  };
-
-  const isWithin24Hours = (apt: Appointment): boolean => {
-    const now = new Date();
-    const aptDate = new Date(apt.date);
-    if (apt.startTime) {
-      const [h, m] = apt.startTime.split(':').map(Number);
-      aptDate.setHours(h, m, 0, 0);
-    }
-    const hoursUntil = differenceInHours(aptDate, now);
-    return hoursUntil >= 0 && hoursUntil <= 24;
   };
 
   // ── Cambiar estado ──────────────────────────────────────

@@ -86,7 +86,7 @@ export default function InstallPrompt() {
             </div>
             <div className="flex-1 min-w-0">
               <h3 className="font-semibold text-gray-900 mb-1">
-                ¡Instala VetCare!
+                ¡Instala Veterinaria Leo!
               </h3>
               <p className="text-sm text-gray-600 mb-3">
                 Instala la aplicación en tu dispositivo para acceder rápidamente y usarla sin conexión.

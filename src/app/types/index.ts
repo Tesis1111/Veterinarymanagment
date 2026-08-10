@@ -434,10 +434,6 @@ export interface DashboardPreferences {
 // VISTAS Y DATOS DERIVADOS
 // ============================================
 
-export interface UserWithPermissions extends User {
-  permissions: Permission[];
-}
-
 export interface PetWithFullInfo extends Pet {
   client: Client;
   breed: Breed & {

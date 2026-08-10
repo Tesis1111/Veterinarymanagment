@@ -18,10 +18,6 @@ import {
   doc,
   getDoc,
   setDoc,
-  collection,
-  query,
-  where,
-  getDocs,
   serverTimestamp,
 } from "firebase/firestore";
 import { auth, db, FIREBASE_CONFIGURED } from "../firebase/config";
@@ -146,7 +142,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+    // La guarda de arriba ya descartó `null`, pero el estrechamiento no
+    // sobrevive al closure asíncrono: se captura en una constante local.
+    const firebaseAuth = auth;
+
+    const unsubscribe = onAuthStateChanged(firebaseAuth, async (fbUser) => {
       if (fbUser) {
         const appUser = await loadUserFromFirestore(fbUser);
         if (appUser && appUser.active) {
@@ -154,7 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setAuditActor(toAuditActor(appUser));
         } else {
           // User exists in Auth but is inactive or has no Firestore doc.
-          await signOut(auth);
+          await signOut(firebaseAuth);
           setUser(null);
           setAuditActor(null);
         }

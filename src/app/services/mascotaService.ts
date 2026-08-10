@@ -3,7 +3,7 @@
  * Fuente de datos: exclusivamente Firebase Firestore.
  */
 import {
-  collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc,
+  collection, doc, getDoc, getDocs, addDoc, updateDoc,
   query, where, serverTimestamp, Timestamp,
 } from "firebase/firestore";
 import { db } from "../firebase/config";
@@ -72,7 +72,13 @@ export async function registrarMascota(data: PetFormData, createdBy: string): Pr
     action: "CREATE", module: "pets", entityType: "mascota", entityId: ref.id,
     details: `Registró la mascota "${data.name}"`, newValues: { ...data },
   });
-  return { id: ref.id, ...data, deceased: false, deleted: false, createdBy, createdAt: new Date() };
+  return {
+    ...data,
+    // `PetFormData.birthDate` es un ISO string (viene del <input type="date">),
+    // pero `Pet` la expone como Date.
+    birthDate: data.birthDate ? new Date(data.birthDate) : undefined,
+    id: ref.id, deceased: false, deleted: false, createdBy, createdAt: new Date(),
+  };
 }
 
 export async function modificarMascota(id: string, data: Partial<PetFormData>, updatedBy: string): Promise<Pet> {

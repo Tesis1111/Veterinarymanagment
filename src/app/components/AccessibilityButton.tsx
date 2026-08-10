@@ -12,9 +12,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
-import { 
-  Settings, 
-  Type, 
+import {
+  Type,
   Layout, 
   Eye, 
   Zap, 
