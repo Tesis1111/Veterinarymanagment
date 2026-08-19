@@ -33,7 +33,7 @@ import {
   signOut as fbSignOut,
 } from "firebase/auth";
 import { initializeApp, deleteApp } from "firebase/app";
-import { db, app, FIREBASE_CONFIGURED } from "../firebase/config";
+import { db, app, auth, FIREBASE_CONFIGURED } from "../firebase/config";
 import { User, UserFormData, PermissionName, FormValidationResult } from "../types";
 import { sincronizarDoctorDeUsuario } from "./doctorService";
 import { audit } from "./auditoriaService";
@@ -385,4 +385,38 @@ export async function traerUsuarioPorId(id: string): Promise<User | null> {
   if (!FIREBASE_CONFIGURED || !db) return null;
   const snap = await getDoc(doc(db, COL, id));
   return snap.exists() ? toUser(snap.id, snap.data()) : null;
+}
+
+export async function actualizarPasswordUsuario(targetUid: string, newPassword: string): Promise<void> {
+  requireFirebase("actualizarPasswordUsuario");
+
+  if (import.meta.env.DEV) {
+    console.info('[usuarioService] Simulación: contraseña del usuario', targetUid, 'cambiada a', newPassword);
+    return;
+  }
+
+  const currentUser = auth?.currentUser;
+  if (!currentUser) {
+    throw new Error("No hay una sesión activa. Debe iniciar sesión como administrador.");
+  }
+
+  const idToken = await currentUser.getIdToken();
+
+  const response = await fetch('/api/update-user-password', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${idToken}`
+    },
+    body: JSON.stringify({ targetUid, newPassword })
+  });
+
+  if (!response.ok) {
+    let errMsg = "Error al actualizar la contraseña del usuario";
+    try {
+      const data = await response.json();
+      errMsg = data.error || errMsg;
+    } catch {}
+    throw new Error(errMsg);
+  }
 }

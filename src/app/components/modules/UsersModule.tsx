@@ -12,6 +12,7 @@ import {
   reactivarUsuario,
   eliminarUsuarioFisico,
   validarUnicidadUsuario,
+  actualizarPasswordUsuario,
 } from "../../services/usuarioService";
 import { asignarRolSeguro } from "../../services/userService";
 import { traerTodosLosDoctores } from "../../services/doctorService";
@@ -326,7 +327,19 @@ export default function UsersModule() {
           );
         }
 
-        setUsers(prev => prev.map(u => u.id === selectedUser.id ? updated : u));
+        // If the password was specified in the edit form, update it!
+        if (formData.password?.trim()) {
+          if (formData.password.trim().length < 6) {
+            toast.error("La contraseña debe tener al menos 6 caracteres (requisito de Firebase).");
+            setIsSaving(false);
+            return;
+          }
+          await actualizarPasswordUsuario(selectedUser.id, formData.password.trim());
+        }
+
+        if (!FIREBASE_CONFIGURED || !db) {
+          setUsers(prev => prev.map(u => u.id === selectedUser.id ? updated : u));
+        }
         showSuccess(`Usuario ${resolvedFullName} actualizado exitosamente.`);
       } else {
         if (!formData.password) { toast.error("La contraseña es obligatoria"); return; }
@@ -346,7 +359,10 @@ export default function UsersModule() {
           ...(formData.domicilio && { domicilio: formData.domicilio }),
           ...profesional,
         } as any, currentUser?.id || "1");
-        setUsers(prev => [...prev, newUser]);
+        
+        if (!FIREBASE_CONFIGURED || !db) {
+          setUsers(prev => [...prev, newUser]);
+        }
 
         if (formData.profesion.trim()) {
           showSuccess(`Usuario "${resolvedFullName}" creado como profesional (${formData.profesion.trim()}).`);
@@ -407,8 +423,10 @@ export default function UsersModule() {
     }
     try {
       await eliminarUsuarioFisico(userToDelete.id);
-      setUsers(prev => prev.filter(u => u.id !== userToDelete.id));
-      setDoctoresFirestore(prev => prev.filter(d => d.userId !== userToDelete.id));
+      if (!FIREBASE_CONFIGURED || !db) {
+        setUsers(prev => prev.filter(u => u.id !== userToDelete.id));
+        setDoctoresFirestore(prev => prev.filter(d => d.userId !== userToDelete.id));
+      }
       showSuccess(`Usuario ${userToDelete.fullName} eliminado definitivamente`);
     } catch {
       toast.error("Error al eliminar definitivamente el usuario.");
