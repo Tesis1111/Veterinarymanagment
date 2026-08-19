@@ -43,6 +43,7 @@ export default function ClientsModule() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("list");
   // Filtro de estado de la lista: activos (por defecto), inactivos (dados de baja) o todos
@@ -156,7 +157,9 @@ export default function ClientsModule() {
     try {
       await eliminarClienteFisico(clientToPurge.id);
       showSuccess(`Cliente ${clientToPurge.fullName} eliminado del sistema exitosamente.`);
-      setClients(prev => prev.filter(c => c.id !== clientToPurge.id));
+      if (!FIREBASE_CONFIGURED || !db) {
+        setClients(prev => prev.filter(c => c.id !== clientToPurge.id));
+      }
     } catch {
       toast.error("Error al eliminar definitivamente el cliente.");
     }
@@ -215,6 +218,8 @@ export default function ClientsModule() {
   };
 
   const handleSave = async () => {
+    if (isSaving) return;
+
     const newErrors = {
       fullName: !formData.fullName ? "Nombre completo es obligatorio" : "",
       dniCuit: validateDniCuit(formData.dniCuit),
@@ -238,14 +243,19 @@ export default function ClientsModule() {
       return;
     }
 
+    setIsSaving(true);
     try {
       if (isEditing && selectedClient) {
         const updated = await asociarCliente(selectedClient.id, formData, user?.id || "1");
-        setClients(prev => prev.map(c => c.id === selectedClient.id ? updated : c));
+        if (!FIREBASE_CONFIGURED || !db) {
+          setClients(prev => prev.map(c => c.id === selectedClient.id ? updated : c));
+        }
         showSuccess(`Cliente ${formData.fullName} actualizado exitosamente.`);
       } else {
         const newClient = await registrarCliente(formData, user?.id || "1");
-        setClients(prev => [...prev, newClient]);
+        if (!FIREBASE_CONFIGURED || !db) {
+          setClients(prev => [...prev, newClient]);
+        }
         showSuccess(`Cliente ${formData.fullName} registrado exitosamente.`);
         
         // Enviar email de bienvenida
@@ -257,6 +267,8 @@ export default function ClientsModule() {
       handleCancel();
     } catch {
       toast.error("Error al guardar el cliente. Intente nuevamente.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -285,7 +297,9 @@ export default function ClientsModule() {
     if (selectedClient) {
       try {
         await eliminarCliente(selectedClient.id, user?.id || "1");
-        setClients(prev => prev.filter(client => client.id !== selectedClient.id));
+        if (!FIREBASE_CONFIGURED || !db) {
+          setClients(prev => prev.filter(client => client.id !== selectedClient.id));
+        }
         showSuccess("Cliente eliminado exitosamente.");
         handleCancel();
       } catch {
@@ -466,10 +480,20 @@ export default function ClientsModule() {
           <div className="flex flex-col sm:flex-row gap-3 mt-6">
             <Button
               onClick={handleSave}
+              disabled={isSaving}
               className="flex-1 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700"
             >
-              <Save className="mr-2 h-4 w-4" />
-              {isEditing ? "Actualizar" : "Guardar"}
+              {isSaving ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="h-3.5 w-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                  Guardando...
+                </span>
+              ) : (
+                <>
+                  <Save className="mr-2 h-4 w-4" />
+                  {isEditing ? "Actualizar" : "Guardar"}
+                </>
+              )}
             </Button>
             <Button
               onClick={handleCancel}
