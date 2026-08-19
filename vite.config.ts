@@ -63,6 +63,13 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       strictPort: false,
+      proxy: {
+        '/api': {
+          target: 'https://veterinarialeo.vercel.app',
+          changeOrigin: true,
+          secure: true,
+        }
+      }
     },
 
     // ── Preview server (used by `vite preview`) ───────────────────────

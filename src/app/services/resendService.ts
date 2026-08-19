@@ -19,12 +19,6 @@ interface EmailLogData {
  * Función interna para llamar a la API y registrar en Firestore
  */
 async function sendEmailAndLog(payload: EmailLogData) {
-  // En `npm run dev` (Vite) el endpoint /api no existe: no intentar enviar
-  // ni ensuciar email_logs con errores de red.
-  if (import.meta.env.DEV) {
-    console.info('[resend] Envío de email omitido en desarrollo:', payload.type, '→', payload.to);
-    return { success: true, id: null, skipped: 'dev' };
-  }
 
   // Todos los correos de este servicio exigen sesión: el endpoint valida el
   // idToken. El único flujo sin sesión (recuperación de contraseña) tiene su

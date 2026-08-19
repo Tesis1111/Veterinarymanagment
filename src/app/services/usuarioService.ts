@@ -390,11 +390,6 @@ export async function traerUsuarioPorId(id: string): Promise<User | null> {
 export async function actualizarPasswordUsuario(targetUid: string, newPassword: string): Promise<void> {
   requireFirebase("actualizarPasswordUsuario");
 
-  if (import.meta.env.DEV) {
-    console.info('[usuarioService] Simulación: contraseña del usuario', targetUid, 'cambiada a', newPassword);
-    return;
-  }
-
   const currentUser = auth?.currentUser;
   if (!currentUser) {
     throw new Error("No hay una sesión activa. Debe iniciar sesión como administrador.");
